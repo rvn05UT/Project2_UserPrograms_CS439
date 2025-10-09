@@ -37,6 +37,7 @@ tid_t process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
@@ -83,7 +84,12 @@ static void start_process (void *file_name_)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait (tid_t child_tid UNUSED) { return -1; }
+int process_wait (tid_t child_tid UNUSED) { 
+  while(true) {
+    //do nothing for now, fix later
+  }
+  return -1; 
+}
 
 /* Free the current process's resources. */
 void process_exit (void)
@@ -187,7 +193,7 @@ struct Elf32_Phdr
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char *cmdline);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -199,6 +205,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Returns true if successful, false otherwise. */
 bool load (const char *file_name, void (**eip) (void), void **esp)
 {
+  printf("load: %s\n", file_name);
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -212,8 +219,26 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  /* Open executable file. */
-  file = filesys_open (file_name);
+  //make a copy for parsing
+  char *cmd_copy = palloc_get_page (0);
+  if (cmd_copy == NULL)
+    return false;
+  strlcpy (cmd_copy, file_name, PGSIZE);
+  
+  //extract program name from the copy
+  char *save_ptr;
+  char *program_name = strtok_r (cmd_copy, " ", &save_ptr);
+  
+  if (program_name == NULL) {
+    palloc_free_page (cmd_copy);
+    return false;
+  }
+
+  file = filesys_open (program_name);
+
+  //free the copy after use
+  palloc_free_page (cmd_copy);
+
   if (file == NULL)
     {
       printf ("load: %s: open failed\n", file_name);
@@ -291,7 +316,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, file_name))
     goto done;
 
   /* Start address. */
@@ -414,20 +439,79 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack (void **esp)
+static bool setup_stack (void **esp, char *cmdline)
 {
   uint8_t *kpage;
   bool success = false;
+  char *argv[128];
+  int argc = 0;
+  int i = 0;
+  char *cur_token, *cur;
 
+  // Parse cmdline into argv
+  printf("Parsing command line: %s\n", cmdline);
+  cur_token = strtok_r (cmdline, " ", &cur);
+   // Debug: Print the command line
+  while (cur_token != NULL && argc < 128) {
+    argv[argc++] = cur_token;
+    cur_token = strtok_r (NULL, " ", &cur);
+  }
+  argv[argc] = NULL; // Null-terminate the array
+  
+  // Debug: Print parsed arguments
+  for (i = 0; i < argc; i++) {
+    printf("argv[%d]: %s\n", i, argv[i]);
+  }
+
+  // Allocate and map stack page
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL)
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
+  if (kpage == NULL)
+    return false;
+    
+  success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+  if (!success) {
+    palloc_free_page (kpage);
+    return false;
+  }
+  
+  // Set up stack with args
+  *esp = (void *)PHYS_BASE;  // Fixed: cast to void *
+  
+  // Push argument strings (bottom-up)
+  for (i = argc - 1; i >= 0; i--) {
+    *esp = (char *)*esp - (strlen(argv[i]) + 1);
+    strlcpy((char *)*esp, argv[i], strlen(argv[i]) + 1);
+    argv[i] = (char *)*esp;
+  }
+  
+  // Word align to 4 bytes
+  *esp = (void *)(((uintptr_t) *esp) & ~3);
+
+  // Push argv array (pointers to argument strings)
+  *esp = (char *)*esp - (argc + 1) * sizeof (char *);
+  char **argv_ptr = (char **) *esp;  // Fixed: proper type
+  
+  // Copy argv pointers to stack
+  for (i = 0; i < argc; i++) {
+    argv_ptr[i] = argv[i];
+  }
+  argv_ptr[argc] = NULL;
+  
+  // Push argv pointer
+  *esp = (char *)*esp - sizeof (char **);
+  *(char ***) *esp = argv_ptr;
+
+  // Push argc
+  *esp = (char *)*esp - sizeof(int);
+  *(int *)*esp = argc;  // Fixed: added missing *
+
+  // Push return address
+  *esp = (char *)*esp - sizeof(void *);
+  *(void **)*esp = NULL;  // Fixed: added missing *
+
+  // Debug: Dump stack
+  hex_dump(*esp, *esp, (uintptr_t)PHYS_BASE - (uintptr_t)*esp, true);
+  
   return success;
 }
 
