@@ -101,7 +101,6 @@ struct thread
   uint32_t *pagedir; /* Page directory. */
   int exit_status;   // exit status for wait() system call
   
-  /* Process tracking for wait() system call */
   struct thread *parent;           // parent process
   struct list children;            // list of child processes
   struct list_elem child_elem;     // element in parent's children list

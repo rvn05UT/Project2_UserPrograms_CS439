@@ -38,7 +38,7 @@ tid_t process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Extract program name for thread name */
+  // extract program name for thread name
   char *save_ptr;
   char *thread_name = strtok_r (fn_copy, " ", &save_ptr);
   if (thread_name == NULL) {
@@ -46,7 +46,7 @@ tid_t process_execute (const char *file_name)
     return TID_ERROR;
   }
   
-  /* Make a copy of just the program name for the thread name */
+  // make a copy of just the program name for the thread name
   thread_name_copy = palloc_get_page (0);
   if (thread_name_copy == NULL) {
     palloc_free_page (fn_copy);
@@ -129,21 +129,21 @@ int process_wait (tid_t child_tid) {
   struct thread *cur = thread_current();
   struct thread *child = thread_get_by_tid(child_tid);
   
-  /* Check if child_tid is a valid child of current process */
+
   if (child == NULL || child->parent != cur)
     return -1;
   
-  /* Check if we've already waited for this child */
+  // check if we've already waited for this child
   if (child->waiting_for_child)
     return -1;
   
-  /* Mark that we're waiting for this child */
+  // mark that we're waiting for this child
   child->waiting_for_child = true;
   
-  /* Wait for child to exit */
+  //wait for child
   sema_down(&child->child_exit);
   
-  /* Get the exit status */
+  // get the exit status
   int exit_status = child->exit_status;
   
   return exit_status;
@@ -155,7 +155,7 @@ void process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  /* Remove self from parent's children list */
+  //remove self from parent's children list
   if (cur->parent != NULL)
     {
       enum intr_level old_level = intr_disable();
@@ -164,7 +164,7 @@ void process_exit (void)
       }
       intr_set_level(old_level);
       
-      /* Notify parent that this child has exited */
+      //signal() that this child has exited
       sema_up(&cur->child_exit);
     }
 

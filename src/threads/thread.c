@@ -257,7 +257,6 @@ struct thread *thread_current (void)
   return t;
 }
 
-/* Returns a thread by its TID, or NULL if not found */
 struct thread *thread_get_by_tid (tid_t tid)
 {
   struct list_elem *e;
