@@ -257,6 +257,21 @@ struct thread *thread_current (void)
   return t;
 }
 
+/* Returns a thread by its TID, or NULL if not found */
+struct thread *thread_get_by_tid (tid_t tid)
+{
+  struct list_elem *e;
+  struct thread *t;
+  
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+    {
+      t = list_entry(e, struct thread, allelem);
+      if (t->tid == tid)
+        return t;
+    }
+  return NULL;
+}
+
 /* Returns the running thread's tid. */
 tid_t thread_tid (void) { return thread_current ()->tid; }
 
@@ -432,6 +447,14 @@ static void init_thread (struct thread *t, const char *name, int priority)
   #ifdef USERPROG
     t->pagedir = NULL;
     t->exit_status = -1;  // initialize exit status for user programs
+    
+    // Initialize process tracking fields
+    t->parent = NULL;
+    list_init(&t->children);
+    sema_init(&t->child_exit, 0);
+    sema_init(&t->load_done, 0);
+    t->load_success = false;
+    t->waiting_for_child = false;
   #endif
 
   old_level = intr_disable ();
