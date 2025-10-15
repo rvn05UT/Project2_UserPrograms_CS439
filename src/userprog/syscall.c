@@ -20,6 +20,8 @@
 static void syscall_handler (struct intr_frame *);
 static void validate_user_ptr (const void *ptr);
 static void validate_user_buffer (const void *ptr, size_t size);
+static void validate_user_string (const char *str);
+static bool range_mapped (const void *usrc, size_t size);
 static bool get_user_bytes (uint8_t *dst, const uint8_t *usrc, size_t size);
 static void halt (void);
 static void exit (int status);
@@ -154,6 +156,40 @@ static void syscall_handler (struct intr_frame *f)
         }
         break;
         
+        case SYS_CREATE: 
+        {
+          const char *file;
+          unsigned initial_size;
+          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *)) ||
+              !get_user_bytes ((uint8_t *) &initial_size, (uint8_t *) (esp + 2), sizeof (unsigned)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+            if (file == NULL) {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+            validate_user_string(file);
+            f->eax = filesys_create(file, initial_size);
+
+
+        }
+        break;
+
+        case SYS_OPEN:
+        {
+          const char *file;
+          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_string (file);
+          f->eax = filesys_open (file);
+        }
+        break;
+
       default:
         // unknown system call - terminate process (file system calls not implemented yet)
         printf ("%s: exit(-1)\n", thread_name ());
@@ -166,22 +202,44 @@ static void syscall_handler (struct intr_frame *f)
 static void
 validate_user_buffer (const void *ptr, size_t size)
 {
-  // check if pointer is null or not in user space
-  if (ptr == NULL || !is_user_vaddr (ptr))
+  // use range_mapped to check the entire range
+  if (!range_mapped (ptr, size))
     {
       printf ("%s: exit(-1)\n", thread_name ());
       thread_exit ();
     }
-  
-  // check if the entire range is in user space
-  const uint8_t *start = (const uint8_t *) ptr;
-  const uint8_t *end = start + size;
-  
-  if (!is_user_vaddr (end - 1))
+}
+
+// returns if the entire [usrc, usrc+size-1] lies in user space
+// and every overlapped page is mapped in the current process.
+static bool
+range_mapped (const void *usrc, size_t size)
+{
+  if (size == 0)
+    return true;
+  if (usrc == NULL)
+    return false;
+
+  const uint8_t *start = (const uint8_t *) usrc;
+  const uint8_t *last  = start + size - 1;
+
+  if (!is_user_vaddr (start) || !is_user_vaddr (last))
+    return false;
+
+  uint8_t *p   = pg_round_down ((void *) start);
+  uint8_t *end = pg_round_down ((void *) last);
+
+  struct thread *cur = thread_current ();
+  if (cur == NULL || cur->pagedir == NULL)
+    return false;
+
+  while (p <= end)
     {
-      printf ("%s: exit(-1)\n", thread_name ());
-      thread_exit ();
+      if (pagedir_get_page (cur->pagedir, p) == NULL)
+        return false;
+      p += PGSIZE;
     }
+  return true;
 }
 
 // safely reads size bytes from user address to kernel address
@@ -189,45 +247,56 @@ validate_user_buffer (const void *ptr, size_t size)
 static bool
 get_user_bytes (uint8_t *dst, const uint8_t *usrc, size_t size)
 {
-  // check if pointer is null or not in user space
-  if (usrc == NULL || !is_user_vaddr (usrc))
+  if (size == 0)
+    return true;
+
+  // validate the entire range, including the last page
+  if (!range_mapped (usrc, size))
     return false;
-  
-  // check if the entire range is in user space
-  const uint8_t *start = (const uint8_t *) usrc;
-  const uint8_t *end = start + size;
-  
-  if (!is_user_vaddr (end - 1))
-    return false;
-  
-  // check if the memory is actually mapped in the current process
-  struct thread *cur = thread_current();
-  if (cur->pagedir == NULL)
-    return false;
-    
-  // check each page in the range
-  for (const uint8_t *addr = start; addr < end; addr += PGSIZE)
-    {
-      if (pagedir_get_page(cur->pagedir, (void*)addr) == NULL)
-        return false;
-    }
-  
+
   // now it's safe to copy
   for (size_t i = 0; i < size; i++)
     dst[i] = usrc[i];
   return true;
 }
 
-
-
 // validates that a single pointer is in user space
 static void
 validate_user_ptr (const void *ptr)
 {
-  if (ptr == NULL || !is_user_vaddr (ptr))
+  if (ptr == NULL || !is_user_vaddr (ptr)) 
     {
       printf ("%s: exit(-1)\n", thread_name ());
       thread_exit ();
+    }
+}
+
+// validates that a null-terminated string is in user space and mapped
+static void validate_user_string(const char *str)
+{
+  if (str == NULL || !is_user_vaddr(str))
+    {
+      printf("%s: exit(-1)\n", thread_name());
+      thread_exit();
+    }
+
+  const char *ptr = str;
+  struct thread *cur = thread_current();
+
+  while (true)
+    {
+      // check if the current pointer is in user space and mapped
+      if (!is_user_vaddr(ptr) || pagedir_get_page(cur->pagedir, (void *)ptr) == NULL)
+        {
+          printf("%s: exit(-1)\n", thread_name());
+          thread_exit();
+        }
+
+      if (*ptr == '\0')
+        break;
+
+      // move to next char
+      ptr++;
     }
 }
 
@@ -270,6 +339,7 @@ static int exec (const char *cmd_line)
 {
   // validate the command line string is in user space
   validate_user_ptr (cmd_line);
+  validate_user_string (cmd_line);
   
   // start the new process and return its thread id
   tid_t tid = process_execute (cmd_line);
