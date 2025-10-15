@@ -29,6 +29,7 @@ static int write (int fd, const void *buffer, unsigned size);
 static int exec (const char *cmd_line);
 static int wait (int child_tid);
 static int read (int fd, void *buffer, unsigned size);
+static int filesize_sys (int fd);
 int allocate_fd(struct file *file);
 struct file *get_file_by_fd(int fd);
 void close_fd(int fd);
@@ -110,7 +111,7 @@ static void syscall_handler (struct intr_frame *f)
             }
           
           // validate the command line pointer is in user space
-          validate_user_ptr (cmd_line);
+          validate_user_string (cmd_line);
           
           // call our exec implementation and set return value
           int result = exec (cmd_line); // start new process
@@ -159,7 +160,7 @@ static void syscall_handler (struct intr_frame *f)
         }
         break;
         
-        case SYS_CREATE: 
+      case SYS_CREATE: 
         {
           const char *file;
           unsigned initial_size;
@@ -226,6 +227,52 @@ static void syscall_handler (struct intr_frame *f)
             thread_exit(); 
 
           close_fd(fd); 
+          break;
+        }
+
+        case SYS_FILESIZE:
+        {
+          int fd;
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(fd)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          f->eax = filesize_sys(fd);
+          break;
+        }
+        case SYS_SEEK:
+        {
+          int fd;
+          unsigned position;
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(int)) ||
+              !get_user_bytes((uint8_t *)&position, (uint8_t *)(esp + 2), sizeof(unsigned)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          struct file *fptr = get_file_by_fd(fd);
+          if (fptr != NULL)
+            file_seek(fptr, position);
+          break;
+        }
+        case SYS_TELL:
+        {
+          int fd;
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(int)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          struct file *fptr = get_file_by_fd(fd);
+          if (fptr == NULL)
+            {
+              f->eax = -1;
+            }
+          else
+            {
+              f->eax = file_tell(fptr);
+            }
           break;
         }
 
@@ -368,13 +415,18 @@ static int write (int fd, const void *buffer, unsigned size)
     }
   else
     {
-      // for now, only support stdout
-      return -1;
+      struct file *temp = get_file_by_fd(fd);
+      if (temp == NULL) {
+        return -1;
+      }
+      validate_user_buffer (buffer, size);
+      int bytes_written = file_write(temp, buffer, size);
+      return bytes_written;
     }
 }
 
 // exec system call - starts another process
-static int exec (const char *cmd_line)
+static int jexec (const char *cmd_line)
 {
   // validate the command line string is in user space
   validate_user_ptr (cmd_line);
@@ -382,7 +434,7 @@ static int exec (const char *cmd_line)
   
   // start the new process and return its thread id
   tid_t tid = process_execute (cmd_line);
-  
+
   // if process_execute returns TID_ERROR, return -1
   if (tid == TID_ERROR)
     return -1;
@@ -437,6 +489,14 @@ static int read (int fd, void *buffer, unsigned size)
       return bytes_read;
 
     }
+}
+
+static int filesize_sys (int fd)
+{
+  struct file *f = get_file_by_fd(fd);
+  if (f == NULL)
+    return -1;
+  return file_length(f);
 }
 
 int allocate_fd(struct file *file) {
