@@ -193,6 +193,14 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+
+  /* Initialize file descriptor table. */
+  t->fd_table = palloc_get_page(0);
+  if (t->fd_table == NULL)
+    PANIC("Failed to allocate file descriptor table.");
+  memset(t->fd_table, 0, PGSIZE); 
+  t->fd_next = 2;
+
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -291,6 +299,13 @@ void thread_exit (void)
   list_remove (&thread_current ()->allelem);
   thread_current ()->status = THREAD_DYING;
   schedule ();
+  struct thread *cur = thread_current ();
+  for (int i = 2; i < PGSIZE / sizeof(struct file *); i++)
+    {
+      if (cur->fd_table[i] != NULL)
+        file_close(cur->fd_table[i]);
+    }
+  palloc_free_page(cur->fd_table);
   NOT_REACHED ();
 }
 
