@@ -29,6 +29,9 @@ static int write (int fd, const void *buffer, unsigned size);
 static int exec (const char *cmd_line);
 static int wait (int child_tid);
 static int read (int fd, void *buffer, unsigned size);
+int allocate_fd(struct file *file);
+struct file *get_file_by_fd(int fd);
+void close_fd(int fd);
 
 void syscall_init (void)
 {
@@ -172,23 +175,59 @@ static void syscall_handler (struct intr_frame *f)
             }
             validate_user_string(file);
             f->eax = filesys_create(file, initial_size);
+        }
+        break;
 
-
+        case SYS_REMOVE: 
+        {
+          const char *file;
+          unsigned initial_size;
+          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *)) ||
+              !get_user_bytes ((uint8_t *) &initial_size, (uint8_t *) (esp + 2), sizeof (unsigned)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+            if (file == NULL) {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+            validate_user_string(file);
+            f->eax = filesys_remove(file);
         }
         break;
 
         case SYS_OPEN:
         {
-          const char *file;
-          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *)))
+          const char *file_name;
+          if (!get_user_bytes((uint8_t *)&file_name, (uint8_t *)(esp + 1), sizeof(file_name)))
+            thread_exit(); 
+
+          validate_user_string(file_name); 
+
+          struct file *file = filesys_open(file_name);
+          if (file == NULL)
             {
-              printf ("%s: exit(-1)\n", thread_name ());
-              thread_exit ();
+              f->eax = -1; 
             }
-          validate_user_string (file);
-          f->eax = filesys_open (file);
+          else
+            {
+              f->eax = allocate_fd(file); 
+              if (f->eax == -1)
+                file_close(file);
+            }
+          break;
         }
-        break;
+
+        case SYS_CLOSE:
+        {
+          int fd;
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(fd)))
+            thread_exit(); 
+
+          close_fd(fd); 
+          break;
+        }
 
       default:
         // unknown system call - terminate process (file system calls not implemented yet)
@@ -386,7 +425,55 @@ static int read (int fd, void *buffer, unsigned size)
     }
   else
     {
-      // for now, only support stdin
-      return -1;
+      struct file *temp = get_file_by_fd(fd);
+      if (temp == NULL) {
+        return -1;
+      }
+      validate_user_buffer (buffer, size);
+      int bytes_read = file_read(temp, buffer, size);
+      if (bytes_read < 0) {
+        printf("file_read failed for fd %d\n", fd);
+      }
+      return bytes_read;
+
     }
+}
+
+int allocate_fd(struct file *file) {
+  struct thread *cur = thread_current();
+  if (cur->fd_table == NULL)
+    return -1;
+
+  // find the next available fd
+  int fd = cur->fd_next;
+  while (fd < PGSIZE / sizeof(struct file *)) {
+    if (cur->fd_table[fd] == NULL) {
+      cur->fd_table[fd] = file; // assign the file to this fd
+      // update fd_next for next allocation
+      cur->fd_next = fd + 1;
+      return fd;
+    }
+    fd++;
+  }
+  return -1; // no available fd
+}
+
+struct file *get_file_by_fd(int fd) {
+  struct thread *cur = thread_current();
+  if (cur->fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(struct file *))
+    return NULL; // invalid fd or fd table not initialized
+  return cur->fd_table[fd];
+}
+
+void close_fd(int fd) {
+  struct thread *cur = thread_current();
+  if (cur->fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(struct file *))
+    return;
+  if (cur->fd_table[fd] != NULL) {
+    file_close(cur->fd_table[fd]);
+    cur->fd_table[fd] = NULL;
+    // update fd_next to allow reusing lower fds
+    if (fd < cur->fd_next)
+      cur->fd_next = fd;
+  }
 }

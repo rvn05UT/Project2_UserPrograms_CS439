@@ -184,6 +184,14 @@ void process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+    
+  /* Close all open files. */
+  for (int i = 2; i < PGSIZE / sizeof(struct file *); i++)
+    {
+      if (cur->fd_table[i] != NULL)
+        file_close(cur->fd_table[i]);
+    }
+  palloc_free_page(cur->fd_table);
 }
 
 /* Sets up the CPU for running user code in the current
