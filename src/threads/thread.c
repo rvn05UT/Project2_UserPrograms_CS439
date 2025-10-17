@@ -196,8 +196,10 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
 
   /* Initialize file descriptor table. */
   t->fd_table = palloc_get_page(0);
-  if (t->fd_table == NULL)
-    PANIC("Failed to allocate file descriptor table.");
+  if (t->fd_table == NULL) {
+    palloc_free_page(t);
+    return TID_ERROR;
+  }
   memset(t->fd_table, 0, PGSIZE); 
   t->fd_next = 2;
 
@@ -300,6 +302,7 @@ void thread_exit (void)
   thread_current ()->status = THREAD_DYING;
   schedule ();
   struct thread *cur = thread_current ();
+  // close file descriptors
   for (int i = 2; i < PGSIZE / sizeof(struct file *); i++)
     {
       if (cur->fd_table[i] != NULL)
@@ -467,8 +470,8 @@ static void init_thread (struct thread *t, const char *name, int priority)
     list_init(&t->children);
     sema_init(&t->child_exit, 0);
     sema_init(&t->load_done, 0);
-    t->load_success = false;
-    t->waiting_for_child = false;
+    t->executable = NULL;
+    t->cstatus = NULL;
   #endif
 
   old_level = intr_disable ();

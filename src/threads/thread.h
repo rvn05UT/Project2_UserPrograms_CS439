@@ -83,6 +83,17 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
+
+struct child_status {
+  tid_t pid;
+  int exit_status;
+  bool exited;
+  bool load_success;       
+  bool waited;
+  struct semaphore sema;     // signaled when child exits
+  struct list_elem elem;     // in parent's children list
+};
+
 struct thread
 {
   /* Owned by thread.c. */
@@ -94,6 +105,7 @@ struct thread
   struct list_elem allelem;  /* List element for all threads list. */
   struct file **fd_table;    /* File descriptor table. */
   int fd_next;               /* Next available file descriptor. */
+  struct file *executable;   /* Executable file. */
 
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
@@ -108,8 +120,8 @@ struct thread
   struct list_elem child_elem;     // element in parent's children list
   struct semaphore child_exit;     // semaphore for child exit notification
   struct semaphore load_done;      // semaphore for exec load completion
-  bool load_success;               // whether exec load was successful
-  bool waiting_for_child;          // whether parent is waiting for this child
+
+  struct child_status *cstatus;    // child's record in parent's children list
 #endif
 
   /* Owned by thread.c. */
