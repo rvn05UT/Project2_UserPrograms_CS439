@@ -142,7 +142,7 @@ static void syscall_handler (struct intr_frame *f)
           void *buffer;
           unsigned size;
           
-          // safely read read arguments from user stack
+          // safely read arguments from user stack
           if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)) ||
               !get_user_bytes ((uint8_t *) &buffer, (uint8_t *) (esp + 2), sizeof (void *)) ||
               !get_user_bytes ((uint8_t *) &size, (uint8_t *) (esp + 3), sizeof (unsigned)))
@@ -426,7 +426,7 @@ static int write (int fd, const void *buffer, unsigned size)
 }
 
 // exec system call - starts another process
-static int jexec (const char *cmd_line)
+static int exec (const char *cmd_line)
 {
   // validate the command line string is in user space
   validate_user_ptr (cmd_line);
@@ -438,16 +438,7 @@ static int jexec (const char *cmd_line)
   // if process_execute returns TID_ERROR, return -1
   if (tid == TID_ERROR)
     return -1;
-  
-  // wait for child to finish loading
-  struct thread *child = thread_get_by_tid(tid);
-  if (child != NULL)
-    {
-      sema_down(&child->load_done); // wait for load to complete
-      if (!child->load_success)
-        return -1;
-    }
-  
+
   // otherwise return the thread id
   return tid;
 }

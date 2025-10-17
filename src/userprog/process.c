@@ -38,41 +38,70 @@ tid_t process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  // extract program name for thread name
-  char *save_ptr;
-  char *thread_name = strtok_r (fn_copy, " ", &save_ptr);
-  if (thread_name == NULL) {
-    palloc_free_page (fn_copy);
-    return TID_ERROR;
-  }
-  
   // make a copy of just the program name for the thread name
   thread_name_copy = palloc_get_page (0);
   if (thread_name_copy == NULL) {
     palloc_free_page (fn_copy);
     return TID_ERROR;
   }
-  strlcpy (thread_name_copy, thread_name, PGSIZE);
-  
+  strlcpy (thread_name_copy, fn_copy, PGSIZE);
+
+  // extract program name for thread name
+  char *save_ptr;
+  char *thread_name = strtok_r (thread_name_copy, " ", &save_ptr);
+  if (thread_name == NULL) {
+    palloc_free_page (fn_copy);
+    palloc_free_page (thread_name_copy);
+    return TID_ERROR;
+  }
+
+  // create the child status record
+  struct child_status *cur_status = palloc_get_page (0);
+  if (cur_status == NULL) {
+    palloc_free_page (cur_status);
+    palloc_free_page (fn_copy);
+    palloc_free_page (thread_name_copy);
+    return TID_ERROR;
+  }
+  enum intr_level old_level = intr_disable();
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (thread_name_copy, PRI_DEFAULT, start_process, file_name);
+  tid = thread_create (thread_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     {
+      palloc_free_page (cur_status);
       palloc_free_page (fn_copy);
       palloc_free_page (thread_name_copy);
       return TID_ERROR;
     }
   
+  palloc_free_page (thread_name_copy);
   /* Set up parent-child relationship */
   struct thread *child = thread_get_by_tid(tid);
   if (child != NULL)
     {
+      // initialize child's child status record
+      cur_status->pid = tid;
+      cur_status->exit_status = -1;
+      cur_status->exited = false;
+      cur_status->waited = false;
+      sema_init(&cur_status->sema, 0);
+      // link child status record to child thread
+      child->cstatus = cur_status;
       child->parent = thread_current();
-      enum intr_level old_level = intr_disable();
-      list_push_back(&thread_current()->children, &child->child_elem);
-      intr_set_level(old_level);
+      // add to parent's children list
+      list_push_back(&thread_current()->children, &cur_status->elem);
     }
-  
+  intr_set_level (old_level);
+  if(child == NULL) {
+      palloc_free_page (cur_status);
+      return TID_ERROR;
+  }
+
+  // wait for child to load
+  sema_down(&child->load_done); 
+  if(!cur_status->load_success) {
+      return TID_ERROR;
+  }
   return tid;
 }
 
@@ -91,20 +120,21 @@ static void start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  //give the load result to the parent
+  if(thread_current()->cstatus != NULL) {
+      thread_current()->cstatus->load_success = success;
+  }
   /* If load failed, quit. */
   // Note: file_name is now the original command line, not allocated with palloc
+  struct thread *cur = thread_current();
+  sema_up(&cur->load_done);
+  palloc_free_page (file_name);
   if (!success)
     {
-      struct thread *cur = thread_current();
-      cur->load_success = false;
-      sema_up(&cur->load_done);
-      thread_exit ();
+      // Signal load failure to parent
+      thread_exit();
     }
-  
-  /* Signal parent that load was successful */
-  struct thread *cur = thread_current();
-  cur->load_success = true;
-  sema_up(&cur->load_done);
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -127,24 +157,36 @@ static void start_process (void *file_name_)
    does nothing. */
 int process_wait (tid_t child_tid) { 
   struct thread *cur = thread_current();
-  struct thread *child = thread_get_by_tid(child_tid);
-  
+  struct child_status *child = NULL;
 
-  if (child == NULL || child->parent != cur)
-    return -1;
+  // Find the child status record for the given child_tid
+  struct list_elem *e;
+  for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
+    struct child_status *cur_child = list_entry(e, struct child_status, elem);
+    if (cur_child->pid == child_tid) {
+      child = cur_child;
+      break;
+    }
+  }
+
+  if(child == NULL) {
+      return -1;
+  }
   
   // check if we've already waited for this child
-  if (child->waiting_for_child)
+  if (child->waited)
     return -1;
+  //mark we are waiting for this child
+  child->waited = true;
   
-  // mark that we're waiting for this child
-  child->waiting_for_child = true;
-  
-  //wait for child
-  sema_down(&child->child_exit);
+  if(!child->exited) {
+    sema_down(&child->sema);
+  }
   
   // get the exit status
   int exit_status = child->exit_status;
+  list_remove(&child->elem);
+  palloc_free_page(child);
   
   return exit_status;
 }
@@ -156,18 +198,19 @@ void process_exit (void)
   uint32_t *pd;
 
   //remove self from parent's children list
-  if (cur->parent != NULL)
+  if (cur->cstatus != NULL)
     {
-      enum intr_level old_level = intr_disable();
-      if (cur->child_elem.prev != NULL || cur->child_elem.next != NULL) {
-        list_remove(&cur->child_elem);
-      }
-      intr_set_level(old_level);
-      
+      cur->cstatus->exited = true;
+      cur->cstatus->exit_status = cur->exit_status;
       //signal() that this child has exited
-      sema_up(&cur->child_exit);
+      sema_up(&cur->cstatus->sema);
     }
 
+    if(cur->executable != NULL) {
+        file_allow_write(cur->executable);
+        file_close(cur->executable);
+        cur->executable = NULL;
+    }
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -297,25 +340,20 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  //make a copy for parsing
-  char *cmd_copy = palloc_get_page (0);
-  if (cmd_copy == NULL)
-    return false;
-  strlcpy (cmd_copy, file_name, PGSIZE);
-  
-  //extract program name from the copy
-  char *save_ptr;
-  char *program_name = strtok_r (cmd_copy, " ", &save_ptr);
-  
-  if (program_name == NULL) {
-    palloc_free_page (cmd_copy);
-    return false;
+  /* Open executable: use only the program name (first token). */
+  char *fn_copy = palloc_get_page (0);
+  if (fn_copy == NULL)
+    goto done;
+  strlcpy (fn_copy, file_name, PGSIZE);
+  char *save_ptr = NULL;
+  char *prog = strtok_r (fn_copy, " ", &save_ptr);
+  if (prog == NULL) {
+    palloc_free_page (fn_copy);
+    goto done;
   }
+  file = filesys_open (prog);
+  palloc_free_page (fn_copy);
 
-  file = filesys_open (program_name);
-
-  //free the copy after use
-  palloc_free_page (cmd_copy);
 
   if (file == NULL)
     {
@@ -323,6 +361,8 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
       goto done;
     }
 
+  file_deny_write(file);
+  t->executable = file;
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr ||
       memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 ||
@@ -404,7 +444,6 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
 
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
