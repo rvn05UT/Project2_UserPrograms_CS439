@@ -133,13 +133,21 @@ interface remains simple and consistent.
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', â€˜#defineâ€™, or
 >> enumeration.  Identify the purpose of each in 25 words or less.
->>
+>> We added a per-process file descriptor table to manage open files. In the 
+thread structure, we added struct file **fd_table to the map file descriptors 
+to their corresponding open file structure, and int fd_next to track the next 
+available descriptor.
 
 
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
->>
+>> Each process maintains its own file descriptor table (fd_table), which 
+stores pointers to open files. When a file is opened, it's assigned the lowest 
+available descriptor number in that process's table. FDs are therefore unique 
+only within a single process. Different processes can use the same descriptor 
+number for different files without conflict because each process's descriptor 
+table is isolated.
 
 
 ---- ALGORITHMS ----
@@ -147,7 +155,14 @@ interface remains simple and consistent.
 
 >> B3: Describe your code for accessing user data in the
 >> kernel.
->>
+>> To safely access user data from kernel space, we implemented helper methods 
+that validate all user-provided pointers before dereferencing them. The 
+function validate_user_ptr() checks that a pointer lies within user address 
+space, while validate_user_buffer() and validate_user_string() make sure that 
+buffers and strings are fully mapped in memory. These funcitons rely on 
+pagedir_get_page() to confirm that each virtual address has a corresponding 
+physical page mapping. If any pointer is invalid, the process is immediately 
+terminated by calling exit(-1).
 
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
@@ -156,7 +171,14 @@ interface remains simple and consistent.
 >> the page table (e.g. calls to pagedir_get_page()) that might result?  
 >> What about for a system call that only copies 2 bytes of data?  Is there 
 >> room for improvement in these numbers, and how much?
->>
+>> When copying a full 4KB page from a user space to the kernel, our code could
+inspect page table as many as 4096 times since the get_user_bytes() functino 
+currently validates each byte in the range. The min number of inspections would
+be one per page. For copying only two bytes, there would be one to two page 
+table lookups, depending on whether the bytes a=cross a page boundary. There's 
+room for improvement by validating memory at the page level instead of per 
+byte, which would reduce the number of checks.
+
 
 
 >> B5: Any access to user program memory at a user-specified address
@@ -172,7 +194,15 @@ interface remains simple and consistent.
 >> allocated resources (locks, buffers, etc.) are freed?  In a few
 >> sentences, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
->>
+>> Our strategy for handling invalid user memory accesses is to validate all 
+pointers before any operation that could fail, and to terminate the process 
+immediately if validation fails. This keeps the main system call code readable 
+and prevents error-handling logic from ovewhelming the core funcitonality. For 
+example, before reading or writing a buffer in the write() call, we first call 
+validate_user_buffer(). If the buffer isn't valid, we print an error message 
+and call exit(-1) without performing any more actions. This makes sure that no 
+resources like locks or buffers remain allocated when a process exits due to 
+an invalid access.
 
 
 ---- SYNCHRONIZATION ----
@@ -180,7 +210,12 @@ interface remains simple and consistent.
 
 >> B6: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
->>
+>> The wait() system call allows a parent process to wait for one of its 
+children to finish executing. When a child process finishes ,it signals the 
+parent using a semaphore. The parent's wait() funciton blocks until this signal
+is received, at which point it gets the child's exit status. Once the parent 
+has collected the exit code, it cleans up the child's resources to prevent 
+memory leaks.
 
 
 >> B7: Consider parent process P with child process C.  Explain how
@@ -206,7 +241,11 @@ interface remains simple and consistent.
 
 >> B9: What advantages or disadvantages can you see to your design
 >> for file descriptors?
->>
+>> Our file descriptor design, which allocates a separate table per process, 
+has isolation between processes. This prevents one process from interfering 
+with another's files, which increases security. Although it has a small amount 
+of memory ovehead per process, it makes it easy to clean up all open files when
+a process exits by iterating through its table and closing each file.
 
 
 >> B10: The default tid_t to pid_t mapping is the identity mapping.
