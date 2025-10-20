@@ -17,9 +17,13 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *file_name, void (**eip) (void), void **esp);
+
+// External reference to the file system lock from syscall.c
+extern struct lock filesys_lock;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -207,8 +211,10 @@ void process_exit (void)
     }
 
     if(cur->executable != NULL) {
+        lock_acquire (&filesys_lock);
         file_allow_write(cur->executable);
         file_close(cur->executable);
+        lock_release (&filesys_lock);
         cur->executable = NULL;
     }
   /* Destroy the current process's page directory and switch back
@@ -351,7 +357,9 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
     palloc_free_page (fn_copy);
     goto done;
   }
+  lock_acquire (&filesys_lock);
   file = filesys_open (prog);
+  lock_release (&filesys_lock);
   palloc_free_page (fn_copy);
 
 
@@ -361,7 +369,9 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
       goto done;
     }
 
+  lock_acquire (&filesys_lock);
   file_deny_write(file);
+  lock_release (&filesys_lock);
   t->executable = file;
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr ||

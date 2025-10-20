@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
 #include "filesys/file.h"
@@ -15,6 +16,9 @@
 // standard file descriptor numbers
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
+
+// Global lock for file system synchronization
+struct lock filesys_lock;
 
 /* Function declarations */
 static void syscall_handler (struct intr_frame *);
@@ -36,6 +40,9 @@ void close_fd(int fd);
 
 void syscall_init (void)
 {
+  // initialize the file system lock
+  lock_init (&filesys_lock);
+  
   // register our system call handler for interrupt 0x30
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
@@ -160,7 +167,7 @@ static void syscall_handler (struct intr_frame *f)
         }
         break;
         
-      case SYS_CREATE: 
+        case SYS_CREATE: 
         {
           const char *file;
           unsigned initial_size;
@@ -175,7 +182,9 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
             validate_user_string(file);
+            lock_acquire (&filesys_lock);
             f->eax = filesys_create(file, initial_size);
+            lock_release (&filesys_lock);
         }
         break;
 
@@ -194,7 +203,9 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
             validate_user_string(file);
+            lock_acquire (&filesys_lock);
             f->eax = filesys_remove(file);
+            lock_release (&filesys_lock);
         }
         break;
 
@@ -206,6 +217,7 @@ static void syscall_handler (struct intr_frame *f)
 
           validate_user_string(file_name); 
 
+          lock_acquire (&filesys_lock);
           struct file *file = filesys_open(file_name);
           if (file == NULL)
             {
@@ -217,6 +229,7 @@ static void syscall_handler (struct intr_frame *f)
               if (f->eax == -1)
                 file_close(file);
             }
+          lock_release (&filesys_lock);
           break;
         }
 
@@ -253,7 +266,11 @@ static void syscall_handler (struct intr_frame *f)
             }
           struct file *fptr = get_file_by_fd(fd);
           if (fptr != NULL)
-            file_seek(fptr, position);
+            {
+              lock_acquire (&filesys_lock);
+              file_seek(fptr, position);
+              lock_release (&filesys_lock);
+            }
           break;
         }
         case SYS_TELL:
@@ -271,7 +288,9 @@ static void syscall_handler (struct intr_frame *f)
             }
           else
             {
+              lock_acquire (&filesys_lock);
               f->eax = file_tell(fptr);
+              lock_release (&filesys_lock);
             }
           break;
         }
@@ -420,7 +439,9 @@ static int write (int fd, const void *buffer, unsigned size)
         return -1;
       }
       validate_user_buffer (buffer, size);
+      lock_acquire (&filesys_lock);
       int bytes_written = file_write(temp, buffer, size);
+      lock_release (&filesys_lock);
       return bytes_written;
     }
 }
@@ -473,7 +494,9 @@ static int read (int fd, void *buffer, unsigned size)
         return -1;
       }
       validate_user_buffer (buffer, size);
+      lock_acquire (&filesys_lock);
       int bytes_read = file_read(temp, buffer, size);
+      lock_release (&filesys_lock);
       if (bytes_read < 0) {
         printf("file_read failed for fd %d\n", fd);
       }
@@ -487,7 +510,10 @@ static int filesize_sys (int fd)
   struct file *f = get_file_by_fd(fd);
   if (f == NULL)
     return -1;
-  return file_length(f);
+  lock_acquire (&filesys_lock);
+  int length = file_length(f);
+  lock_release (&filesys_lock);
+  return length;
 }
 
 int allocate_fd(struct file *file) {
@@ -521,7 +547,9 @@ void close_fd(int fd) {
   if (cur->fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(struct file *))
     return;
   if (cur->fd_table[fd] != NULL) {
+    lock_acquire (&filesys_lock);
     file_close(cur->fd_table[fd]);
+    lock_release (&filesys_lock);
     cur->fd_table[fd] = NULL;
     // update fd_next to allow reusing lower fds
     if (fd < cur->fd_next)
