@@ -216,7 +216,7 @@ void process_exit (void)
 
     if(cur->executable != NULL) {
         lock_acquire (&filesys_lock);
-        file_allow_write(cur->executable);
+        // file_allow_write(cur->executable);
         file_close(cur->executable);
         lock_release (&filesys_lock);
         cur->executable = NULL;
@@ -241,10 +241,16 @@ void process_exit (void)
   /* Close all open files. */
   for (unsigned i = 2; i < PGSIZE / sizeof(struct file *); i++)
     {
-      if (cur->fd_table[i] != NULL)
-        file_close(cur->fd_table[i]);
+      if (cur->fd_table && cur->fd_table[i] != NULL)
+        {
+          lock_acquire (&filesys_lock);
+          file_close(cur->fd_table[i]);
+          lock_release (&filesys_lock);
+          cur->fd_table[i] = NULL;
+        }
     }
-  palloc_free_page(cur->fd_table);
+  if (cur->fd_table)
+    palloc_free_page(cur->fd_table);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -603,11 +609,15 @@ static bool setup_stack (void **esp, const char *cmdline)
   // Allocate and map stack page
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage == NULL)
-    return false;
+    {
+      palloc_free_page(cmdline_copy);
+      return false;
+    }
     
   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
   if (!success) {
     palloc_free_page (kpage);
+    palloc_free_page(cmdline_copy);
     return false;
   }
   
@@ -649,7 +659,6 @@ static bool setup_stack (void **esp, const char *cmdline)
   
   // Free the cmdline copy
   palloc_free_page(cmdline_copy);
-  
   return success;
 }
 
