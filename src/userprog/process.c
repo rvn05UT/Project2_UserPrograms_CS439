@@ -103,10 +103,10 @@ tid_t process_execute (const char *file_name)
       intr_set_level (old_level);
       return TID_ERROR;
   }
+  intr_set_level (old_level);
 
   // wait for child to load
-  sema_down(&child->load_done); 
-  intr_set_level (old_level);
+  sema_down(&child->load_done);
   if(!cur_status->load_success) {
       return TID_ERROR;
   }
@@ -617,7 +617,7 @@ static bool setup_stack (void **esp, const char *cmdline)
   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
   if (!success) {
     palloc_free_page (kpage);
-    palloc_free_page(cmdline_copy);
+    // palloc_free_page(cmdline_copy);
     return false;
   }
   
