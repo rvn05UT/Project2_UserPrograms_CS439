@@ -133,10 +133,30 @@ interface remains simple and consistent.
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', â€˜#defineâ€™, or
 >> enumeration.  Identify the purpose of each in 25 words or less.
->> We added a per-process file descriptor table to manage open files. In the 
-thread structure, we added struct file **fd_table to the map file descriptors 
-to their corresponding open file structure, and int fd_next to track the next 
-available descriptor.
+>> struct child_status:
+  tid_t pid;                   // Child process ID
+  int exit_status;             // Child’s exit code
+  bool exited;                 // True when child terminates
+  bool load_success;           // Indicates if exec() loaded successfully
+  bool waited;                 // Prevents double waiting
+  struct semaphore sema;       // Signaled when child exits
+  struct list_elem elem;       // Element in parent’s children list
+
+Added to struct thread:
+  struct file **fd_table;      // File descriptor table for process
+  int fd_next;                 // Next available file descriptor index
+  struct file *executable;     // Currently running executable (for deny_write)
+  int exit_status;             // Process exit code for wait()
+  struct thread *parent;       // Pointer to parent thread
+  struct list children;        // List of child processes
+  struct list_elem child_elem; // Element in parent’s children list
+  struct semaphore child_exit; // Syncs parent waiting for child exit
+  struct semaphore load_done;  // Syncs parent waiting for exec load
+  struct child_status *cstatus;// Child’s status record in parent’s list
+
+These fields and structs support system call implementation: managing file
+descriptors, tracking parent-child relationships, synchronizing process
+creation, and handling process exit and wait behavior.
 
 
 >> B2: Describe how file descriptors are associated with open files.
