@@ -247,24 +247,26 @@ memory leaks.
 >> d) when P terminates without waiting after C exits?  
 >> e) Are there any special cases?
 
->> A) The parent process P calls wait(C) and blocks on the semaphore. The child process 
-C executes as normal but When C eventually exits, it signals the semaphore, letting P wake up, 
-retrieve C's exit status and return from wait()
+>> A) The parent process P calls wait(C) and blocks on the semaphore. 
+      The child process C executes as normal but When C eventually exits, 
+      it signals the semaphore, letting P wake up, retrieve C's exit status and 
+      return from wait()
 
    B) The child C has already exited and stored its exit status in a shared data structure. 
-   When P calls wait(C), it immediately find's C's exit status without needing to block and returns 
-   the stored exit status while cleaning up C's resources
+   When P calls wait(C), it immediately find's C's exit status without needing to 
+   block and returns the stored exit status while cleaning up C's resources
 
-   C) Parent P exits without calling wait() on any of the children. Child C becomes an orphan but 
-   continues executing. When C eventually exits, it cleans up its own resources since no parent is waiting, 
-   ensuring all process resources are freed
+   C) Parent P exits without calling wait() on any of the children. Child C becomes an orphan 
+   but continues executing. When C eventually exits, it cleans up its own resources since no 
+   parent is waiting, ensuring all process resources are freed
 
-   D) Child C has already exited and cleaned up all of its resources. Parent P is then exiting without 
-   calling wait() and since C's resources are freed, we require no additional cleanup
+   D) Child C has already exited and cleaned up all of its resources. Parent P is then exiting 
+   without calling wait() and since C's resources are freed, we require no additional cleanup
 
-   E) If P calls wait(C) twice, the second wait(C) call returns -1 almost immediately. If P calls wait() 
-   on a non-child process, it returns -1. If C is then terminated by the kernel, wait() returns -1. All of 
-   the resources need to be eventually freed, even if no parent is waiting for them
+   E) If P calls wait(C) twice, the second wait(C) call returns -1 almost immediately. 
+   If P calls wait() on a non-child process, it returns -1. If C is then terminated by the kernel, 
+   wait() returns -1. All of the resources need to be eventually freed, even if no parent is waiting 
+   for them
 
 
 
@@ -272,12 +274,13 @@ retrieve C's exit status and return from wait()
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
->> The exec() system call uses a semaphore to coordinate between the parent and child processes.
-The child process signals the parent only after it has either a) successfully loaded the executable or b) failed 
-to load The parent then blocks on this synchronization prim until the child signals. The load success status is 
-stored in a data structure within the child's thread structure. The child sets this status before signaling the 
-parent and the parent reads this status after being signaled and returns -1 if the loading failed or returns the 
-childs PID if the loading was successful.
+>> The exec() system call uses a semaphore to coordinate between the parent and 
+child processes.The child process signals the parent only after it has either a) 
+successfully loaded the executable or b)failed to load The parent then blocks on this 
+synchronization prim until the child signals. The load success status is stored in a 
+data structure within the child's thread structure. The child sets this status 
+before signaling the parent and the parent reads this status after being signaled and 
+returns -1 if the loading failed  or returns the childs PID if the loading was successful.
 
 
 
@@ -298,8 +301,8 @@ a process exits by iterating through its table and closing each file.
 >> If you changed it, what advantages are there to your approach?
 >> We kept the default identity mapping. We stuck with this approach as it was simple 
 and straightforward, without any additional data structures needed. The identity mapping 
-provides direct correspondence between kernel thread IDs  and process ID's, making implementation 
-and eventual debugging to be easier.
+provides direct correspondence between kernel thread IDs  and process ID's, 
+making implementation and eventual debugging to be easier.
 
 
                            SURVEY QUESTIONS
