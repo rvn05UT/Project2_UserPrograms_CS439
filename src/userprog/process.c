@@ -25,6 +25,7 @@ static bool load (const char *file_name, void (**eip) (void), void **esp);
 // External reference to the file system lock from syscall.c
 extern struct lock filesys_lock;
 
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -62,7 +63,6 @@ tid_t process_execute (const char *file_name)
   // create the child status record
   struct child_status *cur_status = palloc_get_page (0);
   if (cur_status == NULL) {
-    palloc_free_page (cur_status);
     palloc_free_page (fn_copy);
     palloc_free_page (thread_name_copy);
     return TID_ERROR;
@@ -75,6 +75,7 @@ tid_t process_execute (const char *file_name)
       palloc_free_page (cur_status);
       palloc_free_page (fn_copy);
       palloc_free_page (thread_name_copy);
+      intr_set_level (old_level);
       return TID_ERROR;
     }
   
@@ -88,6 +89,7 @@ tid_t process_execute (const char *file_name)
       cur_status->exit_status = -1;
       cur_status->exited = false;
       cur_status->waited = false;
+      cur_status->load_success = false;  // Initialize load_success
       sema_init(&cur_status->sema, 0);
       // link child status record to child thread
       child->cstatus = cur_status;
@@ -95,14 +97,16 @@ tid_t process_execute (const char *file_name)
       // add to parent's children list
       list_push_back(&thread_current()->children, &cur_status->elem);
     }
-  intr_set_level (old_level);
+  
   if(child == NULL) {
       palloc_free_page (cur_status);
+      intr_set_level (old_level);
       return TID_ERROR;
   }
 
   // wait for child to load
   sema_down(&child->load_done); 
+  intr_set_level (old_level);
   if(!cur_status->load_success) {
       return TID_ERROR;
   }
@@ -235,7 +239,7 @@ void process_exit (void)
     }
     
   /* Close all open files. */
-  for (int i = 2; i < PGSIZE / sizeof(struct file *); i++)
+  for (unsigned i = 2; i < PGSIZE / sizeof(struct file *); i++)
     {
       if (cur->fd_table[i] != NULL)
         file_close(cur->fd_table[i]);
@@ -373,6 +377,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
   file_deny_write(file);
   lock_release (&filesys_lock);
   t->executable = file;
+  
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr ||
       memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 ||
@@ -454,6 +459,14 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
 
 done:
   /* We arrive here whether the load is successful or not. */
+  /* If load failed and we have an executable file, clean it up */
+  if (!success && file != NULL) {
+    lock_acquire (&filesys_lock);
+    file_allow_write(file);
+    file_close(file);
+    lock_release (&filesys_lock);
+    t->executable = NULL;
+  }
   return success;
 }
 
@@ -658,3 +671,4 @@ static bool install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL &&
           pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
