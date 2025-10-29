@@ -216,7 +216,6 @@ void process_exit (void)
 
     if(cur->executable != NULL) {
         lock_acquire (&filesys_lock);
-        // file_allow_write(cur->executable);
         file_close(cur->executable);
         lock_release (&filesys_lock);
         cur->executable = NULL;
@@ -254,7 +253,6 @@ void process_exit (void)
 }
 
 /* Sets up the CPU for running user code in the current
-   thread.
    This function is called on every context switch. */
 void process_activate (void)
 {
@@ -361,6 +359,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
   if (fn_copy == NULL)
     goto done;
   strlcpy (fn_copy, file_name, PGSIZE);
+
   char *save_ptr = NULL;
   char *prog = strtok_r (fn_copy, " ", &save_ptr);
   if (prog == NULL) {
@@ -588,11 +587,11 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool setup_stack (void **esp, const char *cmdline)
 {
   uint8_t *kpage;
-  bool success = false;
   char *argv[128];
   int argc = 0;
   int i = 0;
   char *cur_token, *cur;
+  void* stack_limit;
 
   // Parse cmdline into argv
   char *cmdline_copy = palloc_get_page(0);
@@ -614,26 +613,35 @@ static bool setup_stack (void **esp, const char *cmdline)
       return false;
     }
     
-  success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-  if (!success) {
+  if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true)) {
     palloc_free_page (kpage);
-    // palloc_free_page(cmdline_copy);
     return false;
   }
   
   // Set up stack with args
   *esp = (void *)PHYS_BASE;
+  stack_limit = (void *)((uint8_t *)PHYS_BASE - PGSIZE);
   
   // Push argument strings (bottom-up)
   for (i = argc - 1; i >= 0; i--) {
-    *esp = (char *)*esp - (strlen(argv[i]) + 1);
-    strlcpy((char *)*esp, argv[i], strlen(argv[i]) + 1);
+    size_t len = strlen(argv[i]) + 1;
+    //check overflow
+    if((char *)*esp - len < (char *)stack_limit) {
+      palloc_free_page(cmdline_copy);
+      return false;
+    }
+    *esp = (char *)*esp - len;
+    strlcpy((char *)*esp, argv[i], len);
     argv[i] = (char *)*esp;
   }
-  
   // Word align to 4 bytes
   *esp = (void *)(((uintptr_t) *esp) & ~3);
 
+  //check overflow
+  if((char *)*esp - (argc + 1) * sizeof (char *) < (char*)stack_limit) {
+    palloc_free_page(cmdline_copy);
+    return false;
+  }
   // Push argv array (pointers to argument strings)
   *esp = (char *)*esp - (argc + 1) * sizeof (char *);
   char **argv_ptr = (char **) *esp;
@@ -644,14 +652,30 @@ static bool setup_stack (void **esp, const char *cmdline)
   }
   argv_ptr[argc] = NULL;
   
+  //check overflow
+  if((char *)*esp - sizeof(char **) < (char *)stack_limit) {
+    palloc_free_page(cmdline_copy);
+    return false;
+  }
   // Push argv pointer
   *esp = (char *)*esp - sizeof (char **);
   *(char ***) *esp = argv_ptr;
+
+  //check overflow
+  if((char *)*esp - sizeof(int) < (char *)stack_limit) {
+    palloc_free_page(cmdline_copy);
+    return false;
+  }
 
   // Push argc
   *esp = (char *)*esp - sizeof(int);
   *(int *)*esp = argc;
 
+  //check overflow
+  if((char *)*esp - sizeof(void *) < (char *)stack_limit) {
+    palloc_free_page(cmdline_copy);
+    return false;
+  }
   // Push return address
   *esp = (char *)*esp - sizeof(void *);
   *(void **)*esp = NULL;
@@ -659,7 +683,8 @@ static bool setup_stack (void **esp, const char *cmdline)
   
   // Free the cmdline copy
   palloc_free_page(cmdline_copy);
-  return success;
+
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
