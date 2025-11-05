@@ -149,14 +149,22 @@ void *frame_evict(void)
           lock_release(&frame_lock);
           return NULL; // swap write failed
         }
-
-        if (p != NULL) {
-          page_set_swap(&owner->spt, slot);
-        }
       }
     }
-
+    pagedir_clear_page(owner->pagedir, upage);
   }
+  
+  lock_acquire(&frame_lock);
+    struct frame *fr3 = frame_find(kpage);
+    if (fr3) {
+      list_remove(&fr3->elem);
+      free(fr3);
+    }
+    lock_release(&frame_lock);
+
+    if (kpage != NULL) {
+      return kpage;
+    }
 
   return NULL; // no evictable frame found
 }
