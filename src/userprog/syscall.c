@@ -218,7 +218,9 @@ static void syscall_handler (struct intr_frame *f)
           validate_user_string(file_name); 
 
           lock_acquire (&filesys_lock);
-          struct file *file = filesys_open(file_name);
+          struct file *file = filesys_open(file_name);  
+          lock_release (&filesys_lock);
+
           if (file == NULL)
             {
               f->eax = -1; 
@@ -226,10 +228,12 @@ static void syscall_handler (struct intr_frame *f)
           else
             {
               f->eax = allocate_fd(file); 
-              if (f->eax == -1)
+              if (f->eax == -1) {
+                lock_acquire (&filesys_lock);
                 file_close(file);
+                lock_release (&filesys_lock);
+              }
             }
-          lock_release (&filesys_lock);
           break;
         }
 
@@ -523,7 +527,7 @@ int allocate_fd(struct file *file) {
 
   // find the next available fd
   int fd = cur->fd_next;
-  while (fd < PGSIZE / sizeof(struct file *)) {
+  while (fd < 128) {
     if (cur->fd_table[fd] == NULL) {
       cur->fd_table[fd] = file; // assign the file to this fd
       // update fd_next for next allocation
@@ -537,14 +541,14 @@ int allocate_fd(struct file *file) {
 
 struct file *get_file_by_fd(int fd) {
   struct thread *cur = thread_current();
-  if (cur->fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(struct file *))
+  if (cur->fd_table == NULL || fd < 0 || fd > 128)
     return NULL; // invalid fd or fd table not initialized
   return cur->fd_table[fd];
 }
 
 void close_fd(int fd) {
   struct thread *cur = thread_current();
-  if (cur->fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(struct file *))
+  if (cur->fd_table == NULL || fd < 0 || fd > 128)
     return;
   if (cur->fd_table[fd] != NULL) {
     lock_acquire (&filesys_lock);
