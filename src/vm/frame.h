@@ -31,4 +31,7 @@ void frame_remove_owner(struct thread *t);
 void frame_pin(void *kpage);
 void frame_unpin(void *kpage);
 
+// evict a frame and return its kpage
+void *frame_evict(void);
+
 #endif 
