@@ -123,7 +123,6 @@ struct thread
 
   struct child_status *cstatus;    // child's record in parent's children list
 
-  struct hash spt; // supplemental page table
 #endif
 
   /* Owned by thread.c. */

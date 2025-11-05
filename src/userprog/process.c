@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "vm/frame.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *file_name, void (**eip) (void), void **esp);
@@ -234,6 +235,7 @@ void process_exit (void)
          that's been freed (and cleared). */
       cur->pagedir = NULL;
       pagedir_activate (NULL);
+      frame_remove_owner(cur);
       pagedir_destroy (pd);
     }
     
@@ -555,14 +557,14 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
+      uint8_t *kpage = frame_alloc (upage, writable, false);
       if (kpage == NULL)
         return false;
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (kpage);
+          frame_free (kpage);
           return false;
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -570,7 +572,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable))
         {
-          palloc_free_page (kpage);
+          frame_free (kpage);
           return false;
         }
 
@@ -606,15 +608,15 @@ static bool setup_stack (void **esp, const char *cmdline)
   argv[argc] = NULL; // Null-terminate the array
 
   // Allocate and map stack page
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  kpage = frame_alloc (((uint8_t *) PHYS_BASE) - PGSIZE, true, true);
   if (kpage == NULL)
     {
-      palloc_free_page(cmdline_copy);
+      frame_free (kpage);
       return false;
     }
     
   if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true)) {
-    palloc_free_page (kpage);
+    frame_free (kpage);
     return false;
   }
   
