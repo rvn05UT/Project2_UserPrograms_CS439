@@ -106,3 +106,23 @@ void frame_unpin(void *kpage)
   if (fr) fr->pinned = false;
   lock_release(&frame_lock);
 }
+
+void *frame_evict(void)
+{
+  lock_acquire(&frame_lock);
+  struct list_elem *e;
+  for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e))
+    {
+      struct frame *fr = list_entry(e, struct frame, elem);
+      if (!fr->pinned)
+        {
+          void *kpage = fr->kpage;
+          list_remove(&fr->elem);
+          free(fr);
+          lock_release(&frame_lock);
+          return kpage;
+        }
+    }
+  lock_release(&frame_lock);
+  return NULL; // no evictable frame found :(
+}
