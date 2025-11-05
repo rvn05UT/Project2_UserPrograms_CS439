@@ -109,6 +109,8 @@ void frame_unpin(void *kpage)
 
 void *frame_evict(void)
 {
+  // pick victim
+  struct frame *victim = NULL;
   lock_acquire(&frame_lock);
   struct list_elem *e;
   for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e))
@@ -116,13 +118,45 @@ void *frame_evict(void)
       struct frame *fr = list_entry(e, struct frame, elem);
       if (!fr->pinned)
         {
-          void *kpage = fr->kpage;
-          list_remove(&fr->elem);
-          free(fr);
-          lock_release(&frame_lock);
-          return kpage;
+          fr->pinned = true;
+          victim = fr;
+          break;
         }
     }
+  if (!victim) {
+    lock_release(&frame_lock);
+    return NULL; // no evictable frame found
+  }
+
+  // leave frame in list for now
+  void *kpage = victim->kpage;
+  struct thread *owner = victim->owner;
+  void *upage = victim->upage;
   lock_release(&frame_lock);
-  return NULL; // no evictable frame found :(
+
+  // if still mapped, find where to save contents
+  if (owner != NULL && upage != NULL) {
+    void *pagedir_entry = pagedir_get_page(owner->pagedir, upage);
+    if (pagedir_entry != NULL) {
+      struct page *p = page_lookup(owner, upage);
+
+      if (pagedir_is_dirty(owner->pagedir, upage)) {
+        int slot = swap_write(kpage);
+        if (slot < 0) {
+          lock_acquire(&frame_lock);
+          struct frame *fr2 = frame_find(kpage);
+          if (fr2) fr2->pinned = false;
+          lock_release(&frame_lock);
+          return NULL; // swap write failed
+        }
+
+        if (p != NULL) {
+          page_set_swap(&owner->spt, slot);
+        }
+      }
+    }
+
+  }
+
+  return NULL; // no evictable frame found
 }
