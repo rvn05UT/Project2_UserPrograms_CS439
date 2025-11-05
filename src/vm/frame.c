@@ -153,7 +153,8 @@ void *frame_evict(void)
     }
     pagedir_clear_page(owner->pagedir, upage);
   }
-  
+
+  // remove frame from frame table and free it
   lock_acquire(&frame_lock);
     struct frame *fr3 = frame_find(kpage);
     if (fr3) {
