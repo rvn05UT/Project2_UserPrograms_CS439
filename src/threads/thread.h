@@ -122,6 +122,7 @@ struct thread
   struct semaphore load_done;      // semaphore for exec load completion
 
   struct child_status *cstatus;    // child's record in parent's children list
+  struct hash spt;
 
 #endif
 
