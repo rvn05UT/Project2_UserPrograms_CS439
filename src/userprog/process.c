@@ -237,6 +237,7 @@ void process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       frame_remove_owner(cur);
+      page_table_destroy(&cur->spt);
       pagedir_destroy (pd);
     }
     
@@ -568,17 +569,17 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       }
       if (newP == NULL)
         return false;
-      }
+      
       if (!page_install (&thread_current()->spt, newP)) {
           free(newP);
           return false;
       }
 
-
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;  // Advance file offset
     }
   return true;
 }
@@ -620,7 +621,6 @@ static bool setup_stack (void **esp, const char *cmdline)
   }
   struct page* p = page_create_zero (((uint8_t *) PHYS_BASE) - PGSIZE);
   if (p == NULL) {
-    free(p);
     frame_free (kpage);
     frame_free(cmdline_copy);
     return false;

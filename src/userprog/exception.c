@@ -1,9 +1,15 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/pagedir.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "filesys/file.h"
+#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -143,14 +149,107 @@ static void page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading", user ? "user" : "kernel");
 
-  printf ("There is no crying in Pintos!\n");
+  //needs to be user page fault, kernel code shoukd not cause page faults
+  if(!user) {
+   printf ("Page fault at %p: kernel access to invalid address.\n", fault_addr);
+   kill(f);
+   return;
+  }
 
-  kill (f);
+  //rights violation
+  if(!not_present) {
+   printf ("Page fault at %p: rights violation.\n", fault_addr);
+   kill(f);
+   return;
+  }
+
+
+  //no page directory
+  struct thread *cur = thread_current();
+  if(cur == NULL || cur -> pagedir == NULL) {
+   printf ("Page fault at %p: no page directory.\n", fault_addr);
+   kill(f);
+   return;
+  }
+
+  //no page in the SPT
+  struct page *p = page_lookup(&cur->spt, fault_addr);
+  if(p == NULL) {
+   printf ("Page fault at %p: page not present.\n", fault_addr);
+   kill(f);
+   return;
+  }
+
+  //trying to write to a read-only page
+  if(write && !p->writable) {
+   printf ("Page fault at %p: access to read-only page.\n", fault_addr);
+   kill(f);
+   return;
+  }
+
+  //page already loaded
+  if(p->loaded) {
+   printf ("Page fault at %p: page already loaded.\n", fault_addr);
+   kill(f);
+   return;
+  }
+
+  //allocate a physical frame for the page
+  void *kpage = frame_alloc(p -> upage, p -> writable, false);
+  if(kpage == NULL) {
+   printf ("Page fault at %p: no memory for page.\n", fault_addr);
+   kill(f);
+   return;
+  }
+
+  //load the page data into the frame
+
+  //if the page is a file, read the data from the executable
+  if(p->type == PAGE_FILE)
+  {
+    extern struct lock filesys_lock;
+    lock_acquire (&filesys_lock);
+    if (p->read_bytes > 0)
+      {
+        if (file_read_at (p->file, kpage, p->read_bytes, p->file_ofs) != (int) p->read_bytes)
+          {
+            lock_release (&filesys_lock);
+            frame_free (kpage);
+            printf ("Page fault at %p: failed to read from file.\n", fault_addr);
+            kill (f);
+            return;
+          }
+      }
+    lock_release (&filesys_lock);
+    
+    //zero out the rest of the page that wasn't filled from the file
+    memset (kpage + p->read_bytes, 0, p->zero_bytes);
+  }
+  else if (p->type == PAGE_ZERO)
+  {
+    //fill the entire page with zeros (for uninitialized data)
+    memset (kpage, 0, PGSIZE);
+  }
+  else
+  {
+    frame_free (kpage);
+    printf ("Page fault at %p: unknown page type.\n", fault_addr);
+    kill (f);
+    return;
+  }
+
+   //install the page into the page directory
+   if (!pagedir_set_page (cur->pagedir, p->upage, kpage, p->writable))
+   {
+      frame_free (kpage);
+      printf ("Page fault at %p: failed to install page.\n", fault_addr);
+      kill (f);
+      return;
+   }
+
+   //mark the page as loaded
+   page_set_loaded (p, true);
+
 }
+
