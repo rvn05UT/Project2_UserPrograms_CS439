@@ -18,7 +18,7 @@ void swap_init(void) {
   swap_bitmap = bitmap_create(swap_size);
 
   if (swap_bitmap == NULL) {
-    PANIC("Couldn't create swap bitmap"); ///panic the kernel
+    PANIC("Couldn't create swap bitmap"); //panic the kernel
   }
 
   lock_init(&swap_lock);
