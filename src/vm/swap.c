@@ -11,15 +11,15 @@ static struct lock swap_lock;
 void swap_init(void) {
   swap_block = block_get_role(BLOCK_SWAP);
   if (swap_block == NULL) {
-    PANIC("No swap block device found");
+    PANIC("No swap block device found"); //panic the kernel
   }
 
   size_t swap_size = block_size(swap_block) / (PGSIZE / BLOCK_SECTOR_SIZE);
   swap_bitmap = bitmap_create(swap_size);
 
   if (swap_bitmap == NULL) {
-    PANIC("Couldn't create swap bitmap");
+    PANIC("Couldn't create swap bitmap"); ///panic the kernel
   }
-  
+
   lock_init(&swap_lock);
 }
