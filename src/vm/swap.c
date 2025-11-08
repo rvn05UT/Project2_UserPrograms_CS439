@@ -23,3 +23,23 @@ void swap_init(void) {
 
   lock_init(&swap_lock);
 }
+
+
+size_t swap_out(void *kpage) {
+  lock_acquire(&swap_lock);
+
+  size_t slot = bitmap_scan_and_flip(swap_bitmap, 0, 1, false);
+  if (slot == BITMAP_ERROR) {
+    // do I have to lock release here?
+    PANIC("swap partiiton is full"); //panic the kernel
+  }
+
+  //write the page to the swap slot
+  for (size_t i = 0; i < (PGSIZE / BLOCK_SECTOR_SIZE); i++) {
+    block_write(swap_block, slot * (PGSIZE / BLOCK_SECTOR_SIZE) + i,
+                (uint8_t *)kpage + i * BLOCK_SECTOR_SIZE);
+  }
+
+  lock_release(&swap_lock);
+  return slot;
+}
