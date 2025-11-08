@@ -43,3 +43,9 @@ size_t swap_out(void *kpage) {
   lock_release(&swap_lock);
   return slot;
 }
+
+void swap_free(size_t slot) {
+  lock_acquire(&swap_lock);
+  bitmap_set(swap_bitmap, slot, false);
+  lock_release(&swap_lock);
+}
