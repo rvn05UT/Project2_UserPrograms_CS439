@@ -224,7 +224,7 @@ static void page_fault (struct intr_frame *f)
     lock_release (&filesys_lock);
     
     //zero out the rest of the page that wasn't filled from the file
-    memset (kpage + p->read_bytes, 0, p->zero_bytes);
+    memset ((uint8_t *) kpage + p->read_bytes, 0, p->zero_bytes);
   }
   else if (p->type == PAGE_ZERO)
   {

@@ -3,7 +3,8 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
-#include <stdlib.h>
+//#include <stdlib.h>
+#include "threads/malloc.h"
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
