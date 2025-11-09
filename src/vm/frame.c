@@ -88,6 +88,14 @@ void frame_remove_owner(struct thread *t)
       struct list_elem *next = list_next(e);
       if (fr->owner == t)
         {
+          /* If clock_hand points to this frame, advance it to the next element */
+          if (clock_hand == e)
+            {
+              clock_hand = next;
+              /* If we removed the last element, reset clock_hand */
+              if (clock_hand == list_end(&frame_list))
+                clock_hand = list_begin(&frame_list);
+            }
           list_remove(e);
           /* Do not free kpage here; pagedir_destroy will free pages.
              We only drop tracking metadata to avoid dangling references. */
@@ -226,7 +234,7 @@ void *frame_alloc(void *upage, bool writable, bool zero)
   return kpage;
 }
 
-/* This is a corrected version of your eviction function */
+
 void *frame_evict(void)
 {
   lock_acquire(&frame_lock);
@@ -258,6 +266,15 @@ void *frame_evict(void)
 
     if (!fr->pinned) 
     {
+      /* Check if owner's page directory is still valid */
+      if (fr->owner == NULL || fr->owner->pagedir == NULL) {
+        /* Owner has exited - this frame can be evicted immediately */
+        victim = fr;
+        list_remove(&victim->elem);
+        clock_hand = next_hand;
+        break;
+      }
+      
       /* Check the accessed bit of the user page */
       if (pagedir_is_accessed(fr->owner->pagedir, fr->upage)) 
       {
@@ -281,33 +298,47 @@ void *frame_evict(void)
   
   /* We have a victim. Now process it (no lock needed). */
   
-  /* 1. Find its SPT entry (from the VICTIM'S owner) */
+  /* Check if owner has exited (pagedir is NULL) - if so, just free the frame */
+  if (victim->owner == NULL || victim->owner->pagedir == NULL) {
+    void *kpage = victim->kpage;
+    free(victim);
+    return kpage;
+  }
+  
+  /* Find its SPT entry (from the VICTIM'S owner) */
   struct page *p = page_lookup(&victim->owner->spt, victim->upage);
   if (p == NULL) {
-    PANIC("Eviction: No SPT entry for victim frame!");
+    /* SPT might have been destroyed - just free the frame */
+    void *kpage = victim->kpage;
+    free(victim);
+    return kpage;
   }
 
-  /* 2. Check if dirty (must check both aliased addresses) */
+  /* Check if dirty (must check both aliased addresses) */
+  if (victim->owner == NULL || victim->owner->pagedir == NULL) {
+    void *kpage = victim->kpage;
+    free(victim);
+    return kpage;
+  }
+  
   bool dirty = pagedir_is_dirty(victim->owner->pagedir, victim->upage) ||
                pagedir_is_dirty(victim->owner->pagedir, victim->kpage);
 
-  if (p->type == PAGE_FILE && !dirty)
-  {
-    /* 3a. Clean File-Backed Page: Do nothing. 
-       We can just re-read from the file later. */
-  }
-  else
-  {
-    /* 3b. Dirty or Anonymous (ZERO/SWAP) Page: Write to swap. */
-    p->type = PAGE_SWAP;
-    p->page_slot = swap_out(victim->kpage);
-  }
+  /* If it's a clean file-backed page, we can just re-read from the file later.
+     Otherwise (dirty file-backed, zero, or swap), write to swap. */
+  if (!(p->type == PAGE_FILE && !dirty))
+    {
+      p->type = PAGE_SWAP;
+      p->page_slot = swap_out(victim->kpage);
+    }
 
-  /* 4. Update SPT: Mark as no longer loaded */
+  /* Update SPT: Mark as no longer loaded */
   page_set_loaded(p, false);
 
-  /* 5. Unmap from hardware pagedir */
-  pagedir_clear_page(victim->owner->pagedir, victim->upage);
+  /* Unmap from hardware pagedir */
+  if (victim->owner != NULL && victim->owner->pagedir != NULL) {
+    pagedir_clear_page(victim->owner->pagedir, victim->upage);
+  }
 
   /* 6. Free the frame *metadata* (NOT the kpage) */
   void *kpage = victim->kpage;
