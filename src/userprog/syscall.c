@@ -12,6 +12,7 @@
 #include "lib/kernel/console.h"
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
+#include "vm/page.h"
 
 // standard file descriptor numbers
 #define STDIN_FILENO 0
@@ -344,9 +345,35 @@ range_mapped (const void *usrc, size_t size)
 
   while (p <= end)
     {
-      if (pagedir_get_page (cur->pagedir, p) == NULL)
-        return false;
-      p += PGSIZE;
+      // Check if page is loaded in page table
+      if (pagedir_get_page (cur->pagedir, p) != NULL)
+        {
+          p += PGSIZE;
+          continue;
+        }
+      
+      // If not loaded, check if it's in the SPT (demand-paged)
+      struct page *pg = page_lookup (&cur->spt, p);
+      if (pg != NULL)
+        {
+          // Page is in SPT, so it's valid (will be loaded on fault)
+          p += PGSIZE;
+          continue;
+        }
+      
+      // If not in SPT, check if it's in the valid stack range
+      // Stack pages can be demand-paged, so allow them even if not in SPT yet
+      void *bottom_of_stack = (void *)((uint8_t *)PHYS_BASE - 0x800000); // STACK_LIMIT
+      void *top_of_stack = (void *) PHYS_BASE;
+      if (p >= bottom_of_stack && p < top_of_stack)
+        {
+          // Valid stack address - will be handled by page fault handler
+          p += PGSIZE;
+          continue;
+        }
+      
+      // Page not in page table, SPT, or stack range - invalid
+      return false;
     }
   return true;
 }

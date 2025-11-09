@@ -151,11 +151,13 @@ static void page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
 
-  //needs to be user page fault, kernel code shoukd not cause page faults
-  if(!user) {
-   printf ("Page fault at %p: kernel access to invalid address.\n", fault_addr);
-   kill(f);
-   return;
+  // Check if this is a user page fault (either from user mode or accessing user memory from kernel)
+  // If fault address is in user space, treat it as a user page fault (even if in kernel mode during syscall)
+  if (!user && !is_user_vaddr(fault_addr)) {
+    // Kernel accessing kernel memory - this is a kernel bug
+    printf ("Page fault at %p: kernel access to invalid address.\n", fault_addr);
+    kill(f);
+    return;
   }
 
   //rights violation

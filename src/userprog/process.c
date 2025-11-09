@@ -746,10 +746,7 @@ bool grow_stack (void *fault_addr, void *esp) {
       return false;
     }
   }
-  // If no valid ESP, we already checked it's in the stack range above
-  else {
-    return false;
-  }
+  // If no valid ESP (e.g., during syscalls), allow growth if address is in valid stack range
 
   //check if page already exists in SPT
   struct page *p = page_lookup(&cur->spt, fault_page);
