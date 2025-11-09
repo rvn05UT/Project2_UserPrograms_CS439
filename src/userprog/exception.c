@@ -160,7 +160,6 @@ static void page_fault (struct intr_frame *f)
 
   //rights violation
   if(!not_present) {
-   printf ("Page fault at %p: rights violation.\n", fault_addr);
    kill(f);
    return;
   }
@@ -177,7 +176,14 @@ static void page_fault (struct intr_frame *f)
   //no page in the SPT
   struct page *p = page_lookup(&cur->spt, fault_addr);
   if(p == NULL) {
-   //try to grow the stack
+    // Reject NULL, page 0, and kernel addresses immediately - these are never valid
+    // Page 0 (addresses < PGSIZE) should never be mapped (see validate_segment)
+    if (fault_addr == NULL || (uintptr_t) fault_addr < PGSIZE || !is_user_vaddr(fault_addr)) {
+      kill(f);
+      return;
+    }
+    
+    //try to grow the stack
     void *esp = NULL;
     if (user) {
       esp = (void *) f->esp;
