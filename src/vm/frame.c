@@ -6,7 +6,8 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
-#include "vm/page.c"
+#include "vm/page.h"
+#include "vm/swap.h"
 
 //global frame table
 static struct list frame_list;
@@ -111,55 +112,65 @@ void frame_unpin(void *kpage)
 
 void *frame_evict(void)
 {
-  lock_acquire(&frame_lock);
-
   struct page *p = NULL;
 
   if (clock_hand == NULL || clock_hand == list_end(&frame_list)) {
+    lock_acquire(&frame_lock);
     clock_hand = list_begin(&frame_list);
+    lock_release(&frame_lock);
   }
 
   struct frame *victim = NULL;
   int counter = 0;
-  bool found = false;
-  bool lebron = false;
-  
-  while (counter < 2 * list_size(&frame_list)) {
+  bool first_pass = true;
 
-    if (clock_hand == list_end(&frame_list)) {
-      clock_hand = list_begin(&frame_list);
+  lock_acquire(&frame_lock);
+  while (counter < list_size(&frame_list) * 2) {
+    //ensure we set second pass
+    if(counter == list_size(&frame_list)) {
+      first_pass = false;
     }
-
     struct frame *fr = list_entry(clock_hand, struct frame, elem);
 
-
     if (!fr->pinned) {
-
-      if (!found) {
-        victim = fr;
-      }
-    
-
+      // if its not accessed, we reset to accessed and check conditions for eviction
       if (!pagedir_is_accessed(fr->owner->pagedir, fr->upage) && !pagedir_is_accessed(fr->owner->pagedir, fr->kpage)) {
-        
-        victim = fr;
-        found = true;
-        if (!pagedir_is_dirty(fr->owner->pagedir, fr->upage)) {
+
+        pagedir_set_accessed(fr->owner->pagedir, fr->upage, true);
+        pagedir_set_accessed(fr->owner->pagedir, fr->kpage, true);
+        //if its not dirty then we just set victim, if its the second pass then we have to set the victim
+        if(!first_pass || (!pagedir_is_dirty(fr->owner->pagedir, fr->upage) && !pagedir_is_dirty(fr->owner->pagedir, fr->upage))) {
+          victim = fr;
+          clock_hand = list_next(clock_hand);
+          if (clock_hand == list_end(&frame_list)) {
+            clock_hand = list_begin(&frame_list);
+          }
           break;
         }
       }
+      // if it is accessed then we clear accessed
       else {
-        // second change: clear accessed bit
         pagedir_set_accessed(fr->owner->pagedir, fr->upage, false);
         pagedir_set_accessed(fr->owner->pagedir, fr->kpage, false);
       }
-
     }
-
+    
     clock_hand = list_next(clock_hand);
-
+    if (clock_hand == list_end(&frame_list)) {
+      clock_hand = list_begin(&frame_list);
+    }
     counter++;
-
-
   }
+  lock_release(&frame_lock);
+
+  struct page* evicted_page = page_lookup(&thread_current()->spt, victim->upage);
+  lock_acquire(&frame_lock);
+
+  //if its dirty we need swap out 
+  if(pagedir_is_dirty(victim->owner->pagedir, victim->upage) || pagedir_is_dirty(victim->owner->pagedir, victim->kpage)) {
+    evicted_page->type = PAGE_SWAP; 
+    swap_out(victim->kpage);
+  }
+  frame_free(victim->kpage);
+  lock_release(&frame_lock);
 }

@@ -9,6 +9,7 @@
 
 enum type_of_page {
     PAGE_FILE, //page backed by an executable segment
+    PAGE_SWAP,
     PAGE_ZERO, //page zero filled 
 };
 
