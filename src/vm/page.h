@@ -23,8 +23,10 @@ struct page {
     struct file *file; //file contianing the page data
     off_t file_ofs; //offset in f
 
+
     uint32_t read_bytes; //bytes to read from file
     uint32_t zero_bytes; //bytes to zero-fill
+    size_t page_slot; //swap slot if paged out
 
 };
 

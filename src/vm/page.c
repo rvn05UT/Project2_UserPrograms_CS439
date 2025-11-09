@@ -35,6 +35,7 @@ struct page * page_create_file (void *upage, struct file *file, off_t offset,
   p->file_ofs = offset;
   p->read_bytes = read_bytes;
   p->zero_bytes = zero_bytes;
+  p->page_slot = -1; 
   
   return p;
 }

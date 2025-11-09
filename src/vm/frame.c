@@ -39,8 +39,10 @@ void *frame_alloc(void *upage, bool writable, bool zero)
 
   enum palloc_flags flags = PAL_USER | (zero ? PAL_ZERO : 0);
   void *kpage = palloc_get_page(flags);
-  if (kpage == NULL)
-    return NULL; /* TODO: implement eviction when no room */
+  if (kpage == NULL) {
+    frame_evict();
+  }
+   
 
   struct frame *fr = malloc(sizeof *fr);
   if (fr == NULL)
@@ -55,6 +57,7 @@ void *frame_alloc(void *upage, bool writable, bool zero)
 
   lock_acquire(&frame_lock);
   list_push_back(&frame_list, &fr->elem);
+
   lock_release(&frame_lock);
 
   return kpage;
@@ -169,7 +172,7 @@ void *frame_evict(void)
   //if its dirty we need swap out 
   if(pagedir_is_dirty(victim->owner->pagedir, victim->upage) || pagedir_is_dirty(victim->owner->pagedir, victim->kpage)) {
     evicted_page->type = PAGE_SWAP; 
-    swap_out(victim->kpage);
+    evicted_page -> page_slot = swap_out(victim->kpage);
   }
   frame_free(victim->kpage);
   lock_release(&frame_lock);

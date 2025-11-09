@@ -239,6 +239,11 @@ static void page_fault (struct intr_frame *f)
     //zero out the rest of the page that wasn't filled from the file
     memset ((uint8_t *) kpage + p->read_bytes, 0, p->zero_bytes);
   }
+  else if (p->type == PAGE_SWAP)
+  {
+    //read the page data from swap space
+    swap_in (p->page_slot, kpage);
+  }
   else if (p->type == PAGE_ZERO)
   {
     //fill the entire page with zeros (for uninitialized data)
