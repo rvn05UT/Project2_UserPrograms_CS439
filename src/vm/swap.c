@@ -44,6 +44,21 @@ size_t swap_out(void *kpage) {
   return slot;
 }
 
+void swap_in(size_t slot, void *kpage) {
+  lock_acquire(&swap_lock);
+
+  //read the page from the swap slot
+  for (size_t i = 0; i < (PGSIZE / BLOCK_SECTOR_SIZE); i++) {
+    block_read(swap_block, slot * (PGSIZE / BLOCK_SECTOR_SIZE) + i,
+               (uint8_t *)kpage + i * BLOCK_SECTOR_SIZE);
+  }
+
+  //mark the swap slot as free
+  bitmap_set(swap_bitmap, slot, false);
+
+  lock_release(&swap_lock);
+}
+
 void swap_free(size_t slot) {
   lock_acquire(&swap_lock);
   bitmap_set(swap_bitmap, slot, false);
