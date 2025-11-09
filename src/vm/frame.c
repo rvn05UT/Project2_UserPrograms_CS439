@@ -121,8 +121,10 @@ void *frame_evict(void)
 
   struct frame *victim = NULL;
   int counter = 0;
+  bool found = false;
+  bool lebron = false;
   
-  while (counter < list_size(&frame_list)) {
+  while (counter < 2 * list_size(&frame_list)) {
 
     if (clock_hand == list_end(&frame_list)) {
       clock_hand = list_begin(&frame_list);
@@ -130,29 +132,30 @@ void *frame_evict(void)
 
     struct frame *fr = list_entry(clock_hand, struct frame, elem);
 
+
     if (!fr->pinned) {
-      clock_hand = list_next(clock_hand);
-      //continue;
+
+      if (!found) {
+        victim = fr;
+      }
     
 
       if (!pagedir_is_accessed(fr->owner->pagedir, fr->upage) && !pagedir_is_accessed(fr->owner->pagedir, fr->kpage)) {
+        
         victim = fr;
+        found = true;
+        if (!pagedir_is_dirty(fr->owner->pagedir, fr->upage)) {
+          break;
+        }
       }
       else {
+        // second change: clear accessed bit
         pagedir_set_accessed(fr->owner->pagedir, fr->upage, false);
         pagedir_set_accessed(fr->owner->pagedir, fr->kpage, false);
       }
 
-      if (!pagedir_is_dirty(fr->owner->pagedir, fr->upage)) {
-        victim = fr;
-        break;
-      }
-
-      // found victim
-      victim = fr;
-
     }
-    
+
     clock_hand = list_next(clock_hand);
 
     counter++;
