@@ -10,6 +10,7 @@
 #include "vm/frame.h"
 #include "filesys/file.h"
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -176,9 +177,21 @@ static void page_fault (struct intr_frame *f)
   //no page in the SPT
   struct page *p = page_lookup(&cur->spt, fault_addr);
   if(p == NULL) {
-   printf ("Page fault at %p: page not present.\n", fault_addr);
-   kill(f);
-   return;
+   //try to grow the stack
+    void *esp = NULL;
+    if (user) {
+      esp = (void *) f->esp;
+    }
+    
+    if (grow_stack (fault_addr, esp)) {
+      //stack growth successful, return to retry the instruction
+      return;
+    }
+    
+    //not a valid stack growth, kill the process
+    printf ("Page fault at %p: page not present.\n", fault_addr);
+    kill(f);
+    return;
   }
 
   //trying to write to a read-only page

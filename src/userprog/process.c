@@ -333,12 +333,15 @@ struct Elf32_Phdr
 #define PF_X 1 /* Executable. */
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
+#define STACK_LIMIT 0x800000
 
 static bool setup_stack (void **esp, const char *cmdline);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
+bool grow_stack (void *fault_addr, void *esp);
+
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -704,6 +707,79 @@ static bool setup_stack (void **esp, const char *cmdline)
 
   return true;
 }
+
+bool grow_stack (void *fault_addr, void *esp) {
+  //get current thread and the fault address at start of page
+  struct thread *cur = thread_current();
+  void *fault_page = pg_round_down(fault_addr);
+
+  //check if the fault address is a user address
+  if(!is_user_vaddr(fault_addr)) {
+    return false;
+  }
+
+  //find the minimum allowed stack address
+  //check if fault page is within valid stack range
+  void *bottom_of_stack = (void *)((uint8_t *)PHYS_BASE - STACK_LIMIT);
+  void *top_of_stack = (void *) PHYS_BASE;
+  if(fault_page >= top_of_stack || fault_page < bottom_of_stack) {
+    return false;
+  }
+
+  //if we have a valid esp, ensure the fault is close to current stack, since we allow faults up
+  //32 bytes below the esp 
+  if(esp != NULL && is_user_vaddr(esp)) {
+    void *esp_page = pg_round_down(esp);
+    
+    //min allowed is one page below esp
+    void *min_allowed = (void *) ((uint8_t *) esp_page - PGSIZE);
+    //pusha allowance is 32 bytes below esp
+    void *pusha_allowance = (void *) ((uint8_t *) esp - 32);
+    
+    if(fault_page < min_allowed && fault_page < pg_round_down(pusha_allowance)) {
+      return false;
+    }
+  }
+
+  //check if page already exists in SPT
+  struct page *p = page_lookup(&cur->spt, fault_page);
+  if(p != NULL) {
+    return false;
+  }
+
+  //create a new zero page for the SPT
+  struct page *newP = page_create_zero(fault_page);
+  if(newP == NULL) {
+    return false;
+  }
+  //install the new page into the SPT
+  if(!page_install(&cur->spt, newP)) {
+    free(newP);
+    return false;
+  }
+
+  //allocate a physical frame for the page
+  void *kpage = frame_alloc(fault_page, true, true);
+  if(kpage == NULL) {
+    page_remove(&cur->spt, fault_page);
+    return false;
+  }
+
+  //install the page into the page directory
+  if(!pagedir_set_page(cur->pagedir, fault_page, kpage, true)) {
+    frame_free(kpage);
+    page_remove(&cur->spt, fault_page);
+    return false;
+  }
+
+  //mark the page as loaded
+  page_set_loaded(newP, true);
+  
+  return true;
+
+}
+
+  
 
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
