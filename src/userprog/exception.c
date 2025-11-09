@@ -188,8 +188,7 @@ static void page_fault (struct intr_frame *f)
       return;
     }
     
-    //not a valid stack growth, kill the process
-    printf ("Page fault at %p: page not present.\n", fault_addr);
+    //not a valid stack growth, kill the process silently
     kill(f);
     return;
   }

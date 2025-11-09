@@ -726,19 +726,29 @@ bool grow_stack (void *fault_addr, void *esp) {
     return false;
   }
 
-  //if we have a valid esp, ensure the fault is close to current stack, since we allow faults up
-  //32 bytes below the esp 
+  //if we have a valid esp, ensure the fault is close to current stack we allow faults up to 32 bytes below esp (for PUSHA instruction)
   if(esp != NULL && is_user_vaddr(esp)) {
     void *esp_page = pg_round_down(esp);
     
-    //min allowed is one page below esp
-    void *min_allowed = (void *) ((uint8_t *) esp_page - PGSIZE);
-    //pusha allowance is 32 bytes below esp
-    void *pusha_allowance = (void *) ((uint8_t *) esp - 32);
-    
-    if(fault_page < min_allowed && fault_page < pg_round_down(pusha_allowance)) {
+    // Allow faults on the same page as esp or pages above esp (toward PHYS_BASE)
+    if (fault_page >= esp_page && fault_page < top_of_stack) {
+      // Page is at or above current ESP - valid for allocated stack space
+    }
+    // Allow faults on the page below esp, but only if fault_addr >= (esp - 32)
+    else if (fault_page == (void *) ((uint8_t *) esp_page - PGSIZE)) {
+      void *pusha_allowance = (void *) ((uint8_t *) esp - 32);
+      if (fault_addr < pusha_allowance) {
+        return false; 
+      }
+    }
+    // Reject faults on any other page (more than one page below)
+    else {
       return false;
     }
+  }
+  // If no valid ESP, we already checked it's in the stack range above
+  else {
+    return false;
   }
 
   //check if page already exists in SPT
