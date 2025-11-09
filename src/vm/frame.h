@@ -34,4 +34,12 @@ void frame_unpin(void *kpage);
 // evict a frame and return its kpage
 void *frame_evict(void);
 
-#endif 
+/*
+ * Pin/unpin a user buffer range: ensure all overlapped user pages are
+ * faulted in and then mark their frames pinned to prevent eviction/IO
+ * recursion while holding filesystem locks.
+ */
+void vm_pin_buffer(const void *uaddr, size_t size, bool write_access);
+void vm_unpin_buffer(const void *uaddr, size_t size);
+
+#endif
