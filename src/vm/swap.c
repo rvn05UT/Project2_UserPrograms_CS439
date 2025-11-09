@@ -11,14 +11,14 @@ static struct lock swap_lock;
 void swap_init(void) {
   swap_block = block_get_role(BLOCK_SWAP);
   if (swap_block == NULL) {
-    PANIC("No swap block device found"); //panic the kernel
+    PANIC("No swap block device found"); // panic the kernel
   }
 
   size_t swap_size = block_size(swap_block) / (PGSIZE / BLOCK_SECTOR_SIZE);
   swap_bitmap = bitmap_create(swap_size);
 
   if (swap_bitmap == NULL) {
-    PANIC("Couldn't create swap bitmap"); //panic the kernel
+    PANIC("Couldn't create swap bitmap"); // panic the kernel
   }
 
   lock_init(&swap_lock);
@@ -33,10 +33,10 @@ size_t swap_out(void *kpage) {
   // check for error on failure (no free slots)
   if (slot == BITMAP_ERROR) {
     // do I have to lock release here?
-    PANIC("swap partiiton is full"); //panic the kernel
+    PANIC("swap partiiton is full"); // panic the kernel
   }
 
-  //write the page to the swap slot
+  // write the page to the swap slot
   for (size_t i = 0; i < (PGSIZE / BLOCK_SECTOR_SIZE); i++) {
     block_write(swap_block, slot * (PGSIZE / BLOCK_SECTOR_SIZE) + i,
                 (uint8_t *)kpage + i * BLOCK_SECTOR_SIZE);
@@ -49,13 +49,13 @@ size_t swap_out(void *kpage) {
 void swap_in(size_t slot, void *kpage) {
   lock_acquire(&swap_lock);
 
-  //read the page from the swap slot
+  // read the page from the swap slot
   for (size_t i = 0; i < (PGSIZE / BLOCK_SECTOR_SIZE); i++) {
     block_read(swap_block, slot * (PGSIZE / BLOCK_SECTOR_SIZE) + i,
                (uint8_t *)kpage + i * BLOCK_SECTOR_SIZE);
   }
 
-  //mark the swap slot as free
+  // mark the swap slot as free
   bitmap_set(swap_bitmap, slot, false);
 
   lock_release(&swap_lock);
