@@ -160,10 +160,21 @@ static void page_fault (struct intr_frame *f)
     return;
   }
 
-  //rights violation
+  //rights violation - page is present but access is not allowed
   if(!not_present) {
-   kill(f);
-   return;
+    // If this is a user address, kill the user process
+    // (even if we're in kernel mode during a syscall)
+    if (is_user_vaddr(fault_addr)) {
+      struct thread *cur = thread_current();
+      if (cur != NULL) {
+        cur->exit_status = -1;
+        printf ("%s: exit(-1)\n", thread_name ());
+        thread_exit ();
+      }
+    }
+    // Otherwise it's a kernel bug
+    kill(f);
+    return;
   }
 
 
@@ -203,9 +214,20 @@ static void page_fault (struct intr_frame *f)
 
   //trying to write to a read-only page
   if(write && !p->writable) {
-   printf ("Page fault at %p: access to read-only page.\n", fault_addr);
-   kill(f);
-   return;
+    // If this is a user address, kill the user process
+    // (even if we're in kernel mode during a syscall)
+    if (is_user_vaddr(fault_addr)) {
+      printf ("Page fault at %p: access to read-only page.\n", fault_addr);
+      struct thread *cur = thread_current();
+      if (cur != NULL) {
+        cur->exit_status = -1;
+        printf ("%s: exit(-1)\n", thread_name ());
+        thread_exit ();
+      }
+    }
+    // Otherwise it's a kernel bug
+    kill(f);
+    return;
   }
 
   //page already loaded
