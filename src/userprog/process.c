@@ -713,6 +713,11 @@ bool grow_stack (void *fault_addr, void *esp) {
   struct thread *cur = thread_current();
   void *fault_page = pg_round_down(fault_addr);
 
+  // Disallow stack growth if we have no user ESP context (kernel mode syscall).
+  if (esp == NULL) {
+    return false;
+  }
+
   //check if the fault address is a user address
   if(!is_user_vaddr(fault_addr)) {
     return false;
@@ -746,7 +751,6 @@ bool grow_stack (void *fault_addr, void *esp) {
       return false;
     }
   }
-  // If no valid ESP (e.g., during syscalls), allow growth if address is in valid stack range
 
   //check if page already exists in SPT
   struct page *p = page_lookup(&cur->spt, fault_page);

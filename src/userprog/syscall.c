@@ -13,6 +13,7 @@
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
 #include "vm/page.h"
+#include "vm/frame.h"
 
 // standard file descriptor numbers
 #define STDIN_FILENO 0
@@ -470,9 +471,12 @@ static int write (int fd, const void *buffer, unsigned size)
         return -1;
       }
       validate_user_buffer (buffer, size);
+      /* Pin user pages before entering FS to avoid page faults under FS lock. */
+      vm_pin_buffer(buffer, size, false);
       lock_acquire (&filesys_lock);
       int bytes_written = file_write(temp, buffer, size);
       lock_release (&filesys_lock);
+      vm_unpin_buffer(buffer, size);
       return bytes_written;
     }
 }
@@ -525,9 +529,12 @@ static int read (int fd, void *buffer, unsigned size)
         return -1;
       }
       validate_user_buffer (buffer, size);
+      /* Pin destination buffer to avoid page faults while copying into it under FS lock. */
+      vm_pin_buffer(buffer, size, true);
       lock_acquire (&filesys_lock);
       int bytes_read = file_read(temp, buffer, size);
       lock_release (&filesys_lock);
+      vm_unpin_buffer(buffer, size);
       if (bytes_read < 0) {
         printf("file_read failed for fd %d\n", fd);
       }
