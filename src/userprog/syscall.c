@@ -25,16 +25,16 @@ struct lock filesys_lock;
 /* Function declarations */
 static void syscall_handler (struct intr_frame *);
 static void validate_user_ptr (const void *ptr);
-static void validate_user_buffer (const void *ptr, size_t size);
+static void validate_user_buffer (const void *ptr, size_t size, void* esp);
 static void validate_user_string (const char *str);
-static bool range_mapped (const void *usrc, size_t size);
-static bool get_user_bytes (uint8_t *dst, const uint8_t *usrc, size_t size);
+static bool range_mapped (const void *usrc, size_t size, void* esp);
+static bool get_user_bytes (uint8_t *dst, const uint8_t *usrc, size_t size, void* esp);
 static void halt (void);
 static void exit (int status);
-static int write (int fd, const void *buffer, unsigned size);
+static int write (int fd, const void *buffer, unsigned size, void* esp);
 static int exec (const char *cmd_line);
 static int wait (int child_tid);
-static int read (int fd, void *buffer, unsigned size);
+static int read (int fd, void *buffer, unsigned size, void* esp);
 static int filesize_sys (int fd);
 int allocate_fd(struct file *file);
 struct file *get_file_by_fd(int fd);
@@ -58,7 +58,7 @@ static void syscall_handler (struct intr_frame *f)
   validate_user_ptr ((void *) esp);
   
   // safely read the system call number from user stack
-  if (!get_user_bytes ((uint8_t *) &syscall_number, (uint8_t *) esp, sizeof (int)))
+  if (!get_user_bytes ((uint8_t *) &syscall_number, (uint8_t *) esp, sizeof (int), esp))
     {
       printf ("%s: exit(-1)\n", thread_name ());
       thread_exit ();
@@ -75,7 +75,7 @@ static void syscall_handler (struct intr_frame *f)
         {
           int status;
           // safely read the exit status from user stack
-          if (!get_user_bytes ((uint8_t *) &status, (uint8_t *) (esp + 1), sizeof (int)))
+          if (!get_user_bytes ((uint8_t *) &status, (uint8_t *) (esp + 1), sizeof (int), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -91,9 +91,9 @@ static void syscall_handler (struct intr_frame *f)
           unsigned size;
           
           // safely read write arguments from user stack
-          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)) ||
-              !get_user_bytes ((uint8_t *) &buffer, (uint8_t *) (esp + 2), sizeof (void *)) ||
-              !get_user_bytes ((uint8_t *) &size, (uint8_t *) (esp + 3), sizeof (unsigned)))
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int), esp) ||
+              !get_user_bytes ((uint8_t *) &buffer, (uint8_t *) (esp + 2), sizeof (void *), esp) ||
+              !get_user_bytes ((uint8_t *) &size, (uint8_t *) (esp + 3), sizeof (unsigned), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -103,7 +103,7 @@ static void syscall_handler (struct intr_frame *f)
           validate_user_ptr (buffer);
           
           // call our write implementation and set return value
-          int result = write (fd, buffer, size);
+          int result = write (fd, buffer, size, esp);
           f->eax = result;
         }
         break;
@@ -113,7 +113,7 @@ static void syscall_handler (struct intr_frame *f)
           const char *cmd_line;
           
           // safely read exec argument from user stack
-          if (!get_user_bytes ((uint8_t *) &cmd_line, (uint8_t *) (esp + 1), sizeof (const char *)))
+          if (!get_user_bytes ((uint8_t *) &cmd_line, (uint8_t *) (esp + 1), sizeof (const char *), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -133,7 +133,7 @@ static void syscall_handler (struct intr_frame *f)
           int child_tid;
           
           // safely read wait argument from user stack
-          if (!get_user_bytes ((uint8_t *) &child_tid, (uint8_t *) (esp + 1), sizeof (int)))
+          if (!get_user_bytes ((uint8_t *) &child_tid, (uint8_t *) (esp + 1), sizeof (int), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -152,9 +152,9 @@ static void syscall_handler (struct intr_frame *f)
           unsigned size;
           
           // safely read arguments from user stack
-          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)) ||
-              !get_user_bytes ((uint8_t *) &buffer, (uint8_t *) (esp + 2), sizeof (void *)) ||
-              !get_user_bytes ((uint8_t *) &size, (uint8_t *) (esp + 3), sizeof (unsigned)))
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int), esp) ||
+              !get_user_bytes ((uint8_t *) &buffer, (uint8_t *) (esp + 2), sizeof (void *), esp) ||
+              !get_user_bytes ((uint8_t *) &size, (uint8_t *) (esp + 3), sizeof (unsigned), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -164,7 +164,7 @@ static void syscall_handler (struct intr_frame *f)
           validate_user_ptr (buffer);
           
           // call our read implementation and set return value
-          int result = read (fd, buffer, size); // read from stdin only
+          int result = read (fd, buffer, size, esp); // read from stdin only
           f->eax = result;
         }
         break;
@@ -173,8 +173,8 @@ static void syscall_handler (struct intr_frame *f)
         {
           const char *file;
           unsigned initial_size;
-          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *)) ||
-              !get_user_bytes ((uint8_t *) &initial_size, (uint8_t *) (esp + 2), sizeof (unsigned)))
+          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *), esp) ||
+              !get_user_bytes ((uint8_t *) &initial_size, (uint8_t *) (esp + 2), sizeof (unsigned), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -194,8 +194,8 @@ static void syscall_handler (struct intr_frame *f)
         {
           const char *file;
           unsigned initial_size;
-          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *)) ||
-              !get_user_bytes ((uint8_t *) &initial_size, (uint8_t *) (esp + 2), sizeof (unsigned)))
+          if (!get_user_bytes ((uint8_t *) &file, (uint8_t *) (esp + 1), sizeof (const char *), esp) ||
+              !get_user_bytes ((uint8_t *) &initial_size, (uint8_t *) (esp + 2), sizeof (unsigned), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -214,7 +214,7 @@ static void syscall_handler (struct intr_frame *f)
         case SYS_OPEN:
         {
           const char *file_name;
-          if (!get_user_bytes((uint8_t *)&file_name, (uint8_t *)(esp + 1), sizeof(file_name)))
+          if (!get_user_bytes((uint8_t *)&file_name, (uint8_t *)(esp + 1), sizeof(file_name), esp))
             thread_exit(); 
 
           validate_user_string(file_name); 
@@ -242,7 +242,7 @@ static void syscall_handler (struct intr_frame *f)
         case SYS_CLOSE:
         {
           int fd;
-          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(fd)))
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(fd), esp))
             thread_exit(); 
 
           close_fd(fd); 
@@ -252,7 +252,7 @@ static void syscall_handler (struct intr_frame *f)
         case SYS_FILESIZE:
         {
           int fd;
-          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(fd)))
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(fd), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -264,8 +264,8 @@ static void syscall_handler (struct intr_frame *f)
         {
           int fd;
           unsigned position;
-          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(int)) ||
-              !get_user_bytes((uint8_t *)&position, (uint8_t *)(esp + 2), sizeof(unsigned)))
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(int), esp) ||
+              !get_user_bytes((uint8_t *)&position, (uint8_t *)(esp + 2), sizeof(unsigned), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -282,7 +282,7 @@ static void syscall_handler (struct intr_frame *f)
         case SYS_TELL:
         {
           int fd;
-          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(int)))
+          if (!get_user_bytes((uint8_t *)&fd, (uint8_t *)(esp + 1), sizeof(int), esp))
             {
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
@@ -311,10 +311,10 @@ static void syscall_handler (struct intr_frame *f)
 // validates that a range of user memory is valid
 // terminates the process if invalid
 static void
-validate_user_buffer (const void *ptr, size_t size)
+validate_user_buffer (const void *ptr, size_t size, void* esp)
 {
   // use range_mapped to check the entire range
-  if (!range_mapped (ptr, size))
+  if (!range_mapped (ptr, size, esp))
     {
       printf ("%s: exit(-1)\n", thread_name ());
       thread_exit ();
@@ -324,7 +324,7 @@ validate_user_buffer (const void *ptr, size_t size)
 // returns if the entire [usrc, usrc+size-1] lies in user space
 // and every overlapped page is mapped in the current process.
 static bool
-range_mapped (const void *usrc, size_t size)
+range_mapped (const void *usrc, size_t size, void* esp)
 {
   if (size == 0)
     return true;
@@ -362,11 +362,11 @@ range_mapped (const void *usrc, size_t size)
           continue;
         }
       
-      // If not in SPT, check if it's in the valid stack range
+      // If not in SPT, check if it's in stack range and is above the stack pointer
       // Stack pages can be demand-paged, so allow them even if not in SPT yet
-      void *bottom_of_stack = (void *)((uint8_t *)PHYS_BASE - 0x800000); // STACK_LIMIT
+      void *bottom_of_stack = (void *)((uint8_t *)PHYS_BASE - 0x800000); // stack limit
       void *top_of_stack = (void *) PHYS_BASE;
-      if (p >= bottom_of_stack && p < top_of_stack)
+      if (p >= bottom_of_stack && p < top_of_stack && p != NULL && is_user_vaddr(esp) && p > esp)
         {
           // Valid stack address - will be handled by page fault handler
           p += PGSIZE;
@@ -375,20 +375,20 @@ range_mapped (const void *usrc, size_t size)
       
       // Page not in page table, SPT, or stack range - invalid
       return false;
-    }
+      }
   return true;
 }
 
 // safely reads size bytes from user address to kernel address
 // validates the user address range first
 static bool
-get_user_bytes (uint8_t *dst, const uint8_t *usrc, size_t size)
+get_user_bytes (uint8_t *dst, const uint8_t *usrc, size_t size, void* esp)
 {
   if (size == 0)
     return true;
 
   // validate the entire range, including the last page
-  if (!range_mapped (usrc, size))
+  if (!range_mapped (usrc, size, esp))
     return false;
 
   // now it's safe to copy
@@ -453,12 +453,12 @@ static void exit (int status)
 }
 
 // write system call - writes data to a file descriptor
-static int write (int fd, const void *buffer, unsigned size)
+static int write (int fd, const void *buffer, unsigned size, void* esp)
 {
   if (fd == STDOUT_FILENO)
     {
       // validate buffer before writing
-      validate_user_buffer (buffer, size);
+      validate_user_buffer (buffer, size, esp);
       
       // write to console
       putbuf (buffer, size);
@@ -470,8 +470,8 @@ static int write (int fd, const void *buffer, unsigned size)
       if (temp == NULL) {
         return -1;
       }
-      validate_user_buffer (buffer, size);
-      /* Pin user pages before entering FS to avoid page faults under FS lock. */
+      validate_user_buffer (buffer, size, esp);
+      // pin buffer
       vm_pin_buffer(buffer, size, false);
       lock_acquire (&filesys_lock);
       int bytes_written = file_write(temp, buffer, size);
@@ -507,12 +507,12 @@ static int wait (int child_tid)
 }
 
 // read system call - reads from a file descriptor
-static int read (int fd, void *buffer, unsigned size)
+static int read (int fd, void *buffer, unsigned size, void* esp)
 {
   if (fd == STDIN_FILENO)
     {
       // validate buffer before reading
-      validate_user_buffer (buffer, size);
+      validate_user_buffer (buffer, size, esp);
       
       // read from keyboard
       unsigned i;
@@ -528,8 +528,8 @@ static int read (int fd, void *buffer, unsigned size)
       if (temp == NULL) {
         return -1;
       }
-      validate_user_buffer (buffer, size);
-      /* Pin destination buffer to avoid page faults while copying into it under FS lock. */
+      validate_user_buffer (buffer, size, esp);
+      //pin buffer
       vm_pin_buffer(buffer, size, true);
       lock_acquire (&filesys_lock);
       int bytes_read = file_read(temp, buffer, size);
