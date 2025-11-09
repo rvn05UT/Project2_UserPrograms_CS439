@@ -28,7 +28,9 @@ void swap_init(void) {
 size_t swap_out(void *kpage) {
   lock_acquire(&swap_lock);
 
+  // find a free bit in the swap bitmap and flip it to used, returning its index
   size_t slot = bitmap_scan_and_flip(swap_bitmap, 0, 1, false);
+  // check for error on failure (no free slots)
   if (slot == BITMAP_ERROR) {
     // do I have to lock release here?
     PANIC("swap partiiton is full"); //panic the kernel
