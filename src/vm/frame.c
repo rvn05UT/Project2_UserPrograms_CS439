@@ -6,10 +6,12 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
+#include "vm/page.c"
 
 //global frame table
 static struct list frame_list;
 static struct lock frame_lock;
+static struct list_elem *clock_hand;
 
 void frame_table_init(void)
 {
@@ -109,7 +111,37 @@ void frame_unpin(void *kpage)
 
 void *frame_evict(void)
 {
+
+  lock_acquire(&frame_lock);
+  if (clock_hand == NULL || clock_hand == list_end(&frame_list)) {
+    clock_hand = list_begin(&frame_list);
+  }
+
   
+  while (true) {
+    if (clock_hand == list_end(&frame_list)) {
+      clock_hand = list_begin(&frame_list);
+    }
+    struct frame *fr = list_entry(clock_hand, struct frame, elem);
+    if (fr->pinned) {
+      clock_hand = list_next(clock_hand);
+      continue;
+    }
+
+      if (pagedir_is_accessed(fr->owner->pagedir, fr->upage) || pagedir_is_accessed(fr->owner->pagedir, fr->kpage)) {
+        pagedir_set_accessed(fr->owner->pagedir, fr->upage, false);
+        pagedir_set_accessed(fr->owner->pagedir, fr->kpage, false);
+        clock_hand = list_next(clock_hand);
+        continue;
+      }
+
+      break; // found victim
+
+
+
+  }
+
+
   // // pick victim
   // struct frame *victim = NULL;
   // lock_acquire(&frame_lock);
