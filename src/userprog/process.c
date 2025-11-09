@@ -217,24 +217,25 @@ void process_exit (void)
       sema_up(&cur->cstatus->sema);
     }
 
+  // Check if we already hold the filesys_lock
+  // iff so we'll skip acquire/release and release it at the end
+  bool filesys_lock_held = lock_held_by_current_thread(&filesys_lock);
+
     if(cur->executable != NULL) {
-        lock_acquire (&filesys_lock);
+        if (!filesys_lock_held)
+          lock_acquire (&filesys_lock);
         file_close(cur->executable);
-        lock_release (&filesys_lock);
+        if (!filesys_lock_held)
+          lock_release (&filesys_lock);
         cur->executable = NULL;
     }
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
+  
+
+  // Destroy the current process's page directory and switch back to the kernel-only page directory
   pd = cur->pagedir;
   if (pd != NULL)
     {
-      /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
+      
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       frame_remove_owner(cur);
@@ -242,19 +243,25 @@ void process_exit (void)
       pagedir_destroy (pd);
     }
     
-  /* Close all open files. */
+  // Close all open files
   for (unsigned i = 2; i < PGSIZE / sizeof(struct file *); i++)
     {
       if (cur->fd_table && cur->fd_table[i] != NULL)
         {
-          lock_acquire (&filesys_lock);
+          if (!filesys_lock_held)
+            lock_acquire (&filesys_lock);
           file_close(cur->fd_table[i]);
-          lock_release (&filesys_lock);
+          if (!filesys_lock_held)
+            lock_release (&filesys_lock);
           cur->fd_table[i] = NULL;
         }
     }
   if (cur->fd_table)
     palloc_free_page(cur->fd_table);
+  
+  // Release filesys_lock if we were holding it when we entered process_exit
+  if (filesys_lock_held)
+    lock_release (&filesys_lock);
 }
 
 /* Sets up the CPU for running user code in the current
