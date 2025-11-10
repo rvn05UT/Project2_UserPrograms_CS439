@@ -10,6 +10,7 @@
 #include "vm/swap.h"
 #include <string.h>
 #include "threads/vaddr.h"
+
 //global frame table
 static struct list frame_list;
 static struct lock frame_lock;
@@ -93,8 +94,6 @@ void frame_unpin(void *kpage)
   lock_release(&frame_lock);
 }
 
-
-/* In vm/frame.c */
 
 void *frame_alloc(void *upage, bool writable, bool zero)
 {
