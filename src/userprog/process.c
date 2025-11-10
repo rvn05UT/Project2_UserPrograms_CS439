@@ -706,7 +706,7 @@ static bool setup_stack (void **esp, const char *cmdline)
   }
   // Push return address
   *esp = (char *)*esp - sizeof(void *);
-  *(void **)*esp = NULL;
+  *((void **)(*esp)) = NULL;
 
   
   // Free the cmdline copy
