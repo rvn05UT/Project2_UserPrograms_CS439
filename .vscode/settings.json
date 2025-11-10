@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "string.h": "c",
-        "bitmap.h": "c"
+        "bitmap.h": "c",
+        "list.h": "c"
     }
 }

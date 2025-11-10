@@ -101,6 +101,7 @@ void frame_unpin(void *kpage)
 
 void *frame_alloc(void *upage, bool zero)
 {
+  ASSERT (upage != NULL);
   enum palloc_flags flags = PAL_USER | (zero ? PAL_ZERO : 0);
   void *kpage = palloc_get_page(flags);
 
