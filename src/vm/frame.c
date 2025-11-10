@@ -119,7 +119,6 @@ void *frame_alloc(void *upage, bool zero)
       // eviction failed (prob swap is full)
       PANIC("Eviction failed, out of memory and swap");
     }
-
    
     if (zero) {
         memset(kpage, 0, PGSIZE);
@@ -238,7 +237,7 @@ void *frame_evict(void)
 
   /* If it's a clean file-backed page, we can just re-read from the file later.
      Otherwise (dirty file-backed, zero, or swap), write to swap. */
-  if (!(p->type == PAGE_FILE && !dirty))
+  if (p->type != PAGE_FILE || dirty)
     {
       p->type = PAGE_SWAP;
       p->page_slot = swap_out(victim->kpage);
