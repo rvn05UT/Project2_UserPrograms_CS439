@@ -91,14 +91,39 @@ Unique Number: 54895
 >> A1: Consider the supplemental page table. For this data structure, submit:
 >>
 >>    1) the C declarations of these data structures
+        struct hash spt;  
+
+        struct page {
+            void *upage;              
+            enum type_of_page type;   
+            bool writable;            
+            bool loaded;              
+            struct hash_elem elem;    
+            
+            struct file *file;        
+            off_t file_ofs;           
+            uint32_t read_bytes;      
+            uint32_t zero_bytes;      
+            size_t page_slot;         
+        };
+
 >>    2) a few bullets or sentences about each data structure describing:
 >>        a) how it is populated,
+            - When we have an executable loading in process.c, page_create_file() creates entries for code segments. 
+            - When there is stack growth, page_create_zero() creates entries for new stack pages
+            - Those entries are then installed via page_install()
 >>        b) how it is accessed,
+            - With page_lookup, we can access them using the virtual address
+            - The hash table has keys based on the user virtual address
 >>        c) how it is destroyed,
+            - page_table_destroy() calls on process exit, which calls hash_destroy with page_destructore to free the struct page entries
 >>        d) the expected size of that data structure,
+            - Each struct page is 40 bytes, total size varies with the number of pages per process
 >>	  e) how many of that data structure you expect to exist in your
 >>           system, and 
+            -  There is one page table per process, we are storing it in our thread struct
 >>        f) how many processes could potentially touch that data.
+            - Ownly the process that owns the supplemental page table can access it
 >>
 
 
@@ -107,7 +132,12 @@ Unique Number: 54895
 
 >> A2: What data will be necessary when a process page faults in the 
 >> code segment? How will your implementation locate that necessary data?
->>
+>>      
+        When a process page faults in the code segment, the handler needs the SPT entry for the faulting virtual address. This includes
+        the type of Page, a file pointer to the executable, the file offset, read_bytes + zero_bytes, the writable flag, and the loaded the flag.
+        The handler then calls this entry during page_lookup() with the faulting address which returns a struct page* for that virtual page. If NULL is returned,
+        this means the access is either invalid or we need to grow our stack.
+
 
 
 
@@ -115,7 +145,10 @@ Unique Number: 54895
 >> kernel and user virtual addresses that are aliases for the same
 >> frame, or alternatively how do you plan to avoid the issue?
 >>
-
+        We check both aliased addresses when reading dirty bits during eviction. In frame_evict(), we check the dirty bit for both the user virtual address
+        and the kernel virtual address using pagedir_is_dirty(). For the accessed bit, we check only the user virtual address which is fine since user accesses
+        set it. To prevent eviction during critical operations, we pin frames using frame_pin() when the kernel access user data, ensuring frames aren't evicted
+        while being accessed by kernel code
 
 ---- SYNCHRONIZATION ----
 
@@ -123,6 +156,9 @@ Unique Number: 54895
 >> A4: When two user processes both need a new frame at the same time,
 >> what race conditions are possible?  How will they be avoided?
 >>
+        When two processes need a new frame simultaneously, we see the potential for a few race conditions. Both processes might call frame_alloc() when
+        no free frames are avaliable, both might try evicting the exact same frame while one might try to evict a frame another is trying to access. We prevent
+        these conditions from occuring using a frame_lock that protects all frame table operations. This helps prevent dangerous race conditions with frame operations from occuring
 
 
 
@@ -135,14 +171,38 @@ Unique Number: 54895
 >> B1A: Consider the frame table. For this data structure, submit:
 >>
 >>    1) the C declarations of these data structures
+            static struct list frame_list;
+            static struct lock frame_lock;
+            static struct list_elem *clock_hand;
+
+            struct frame {
+                void *kpage;               
+                void *upage;               
+                struct thread *owner;      
+                bool pinned;               
+                struct list_elem elem;     
+            };
+
+
 >>    2) a few bullets or sentences about each data structure describing:
 >>        a) how it is populated,
+            - When frame_alloc() allocates a frame, it creates a struct frame, sets our kpage, upage, owner and pinned, and then adds the frame
+            to the frame list
 >>        b) how it is accessed,
+            - frame_find() searches the list by kpage to locate a frame
+            - frame_evict goes through the list using the clock hand for victim selection
+            - frame_pin and frame_unpin use frame_find to locate their frames
+
 >>        c) how it is destroyed,
+            - frame_free removes and frees a single frame when we free a page
+            -  frame_remove_owner() removes and fress all frames owned by a process when exiting
 >>        d) the expected size of that data structure,
+            - Each struct frame is 24 bytes
 >>	  e) how many of that data structure you expect to exist in your
 >>           system, and 
+            - One global frame table exists for the system
 >>        f) how many processes could potentially touch that data.
+            - All process that allocate user pages touch the frame table
 >>
 
 
