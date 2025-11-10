@@ -195,19 +195,22 @@ happening.
 
 >>    2) a few bullets or sentences about each data structure describing:
 >>        a) how it is populated,
-            - When frame_alloc() allocates a frame, it creates a struct frame, sets our kpage, upage, owner and pinned, and then adds the frame
+            - When frame_alloc() allocates a frame, it creates a struct frame, 
+            sets our kpage, upage, owner and pinned, and then adds the frame
             to the frame list
 >>        b) how it is accessed,
             - frame_find() searches the list by kpage to locate a frame
-            - frame_evict goes through the list using the clock hand for victim selection
+            - frame_evict goes through the list using the clock hand for victim
+            selection
             - frame_pin and frame_unpin use frame_find to locate their frames
 
 >>        c) how it is destroyed,
             - frame_free removes and frees a single frame when we free a page
-            -  frame_remove_owner() removes and fress all frames owned by a process when exiting
+            -  frame_remove_owner() removes and fress all frames owned by a 
+            process when exiting
 >>        d) the expected size of that data structure,
             - Each struct frame is 24 bytes
->>	  e) how many of that data structure you expect to exist in your
+>>	      e) how many of that data structure you expect to exist in your
 >>           system, and 
             - One global frame table exists for the system
 >>        f) how many processes could potentially touch that data.
@@ -223,19 +226,23 @@ happening.
 >>    1) the C declarations of these data structures
 >>    2) a few bullets or sentences about each data structure describing:
 >>        a) how it is populated,
-             - the bitmap is populated when swap_out is called when a dirty frame is evicted.
-               It finds the first slot open and writes the swap_block based on the frame. Makes the bit true
+             - the bitmap is populated when swap_out is called when a dirty 
+             frame is evicted.
+             - It finds the first slot open and writes the swap_block based on 
+             the frame. Makes the bit true
 >>        b) how it is accessed,
              -It is used by swap_out, swap_in, and swap_free 
 >>        c) how it is destroyed
-             - in bitmap is never destroyed, but slots are through swap_free, where the bit is set to false
+             - in bitmap is never destroyed, but slots are through swap_free, 
+             where the bit is set to false
 >>        d) the expected size of that data structure,
              - Each swap_block is 4096 bytes
 >>        e) how many of that data structure you expect to exist in your
 >>           system, and 
              _ only one bitmap and swap_lock, but many swap_blocks
 >>        f) how many processes could potentially touch that data.
-             - All process could touch the bitmap, based on if its corresponding frame gets evicted.
+             - All process could touch the bitmap, based on if its 
+             corresponding frame gets evicted.
  
 >>
 
@@ -245,11 +252,12 @@ happening.
 
 >> B2: When a frame is required but none are free, some frame must be
 >> evicted.  Describe your algorithm for choosing a frame to evict.
->> - We use the clock hand algorithm while looping through the frame list. 
-We start iterating from the clock hand and skip all the pinned frames.
- The victim is picked when it either has no owner or is not acessed. If the frame is
-acessed, we then set the acessed to 0 to give it a second chance. Once the victim is found,
-we remove it from the frame list and update the clock hand to the next frame.
+>> We use the clock hand algorithm while looping through the frame list. We 
+start iterating from the clock hand and skip all the pinned frames. The victim 
+is picked when it either has no owner or is not acessed. If the frame is
+acessed, we then set the acessed to 0 to give it a second chance. Once the 
+victim is found, we remove it from the frame list and update the clock hand to 
+the next frame.
    
 
 
@@ -261,9 +269,11 @@ we remove it from the frame list and update the clock hand to the next frame.
 
 >> B4: Explain your heuristic for deciding whether or not page fault 
 >> for an invalid virtual address should cause the stack to be extended.
->> We implement our heuristic in the grow_stack function which is called by the page_fault handler if the adress
-is not found. We first validate that the adress is in the user space and below the 8MB stack limit. Then as long as
-the adress is near the users current stack pointer (within 32 bytes), then it is a valid stack growth request.
+>> We implement our heuristic in the grow_stack function which is called by the
+page_fault handler if the adress is not found. We first validate that the 
+adress is in the user space and below the 8MB stack limit. Then as long as the 
+adress is near the users current stack pointer (within 32 bytes), then it is a 
+valid stack growth request.
 
 
 
@@ -272,10 +282,11 @@ the adress is near the users current stack pointer (within 32 bytes), then it is
 
 >> B5: Explain the basics of how you plan to manage synchronization in your VM
 >> design.  In particular, explain how it will prevent deadlock. 
->> We use 3 locks for the swap_bitmap, frame_list, and file I/O. We ensure that only one
-process can deal with them at a time, preventing race conditions. We also prevent the deadlock
-of when a system call holding a lock causes a page fault, which then tries to acquire the same
-lock to load the page. We prevent this by pinning which loads the necessary pages before locking.
+>> We use 3 locks for the swap_bitmap, frame_list, and file I/O. We ensure that
+only one process can deal with them at a time, preventing race conditions. We 
+also prevent the deadlock of when a system call holding a lock causes a page 
+fault, which then tries to acquire the same lock to load the page. We prevent 
+this by pinning which loads the necessary pages before locking.
 
 
 >> B6: A page fault in process P can cause another process Q's page
@@ -289,8 +300,9 @@ lock to load the page. We prevent this by pinning which loads the necessary page
 >> the filesystem or swap.  How will you ensure that a second process Q
 >> cannot interfere by, for example, attempting to evict a page while it is
 >> still being read in?
->> This cannot happen because the frame is currently pinned when being read, This 
-would prevent this frame from being evicted as no pinned frame could be evicted.
+>> This can't happen because the frame is currently pinned when being read. 
+This would prevent this frame from being evicted as no pinned frame could be 
+evicted.
 
 
 >> B8: Explain how you handle access to paged-out pages that occur
@@ -298,8 +310,9 @@ would prevent this frame from being evicted as no pinned frame could be evicted.
 >> in user programs), or will you have a mechanism for "locking" frames
 >> into physical memory, or will you use some other design?  If your method
 >> could result in potential deadlock, how will you prevent it?  
->> We used pinning a page faults during a syscall would cause a deadlock. 
-Our read and write functions call vm_pin_buffer before acquiring the filesys_lock and 
-this helper function iterates through the user's buffer and intentionally triggers a page fault 
-for any page that is not currently loaded. This forces the page_fault handler to run 
-and load the page before any locks are held, preventing a deadlock.
+>> We used pinning a page faults during a syscall would cause a deadlock. Our 
+read and write functions call vm_pin_buffer before acquiring the filesys_lock 
+and this helper function iterates through the user's buffer and intentionally 
+triggers a page fault for any page that is not currently loaded. This forces 
+the page_fault handler to run and load the page before any locks are held, 
+preventing a deadlock.
