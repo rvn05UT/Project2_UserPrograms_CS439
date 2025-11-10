@@ -279,7 +279,7 @@ pagedir_set_page() to install the page.
 >> We implement our heuristic in the grow_stack function which is called by the
 page_fault handler if the adress is not found. We first validate that the 
 adress is in the user space and below the 8MB stack limit. Then as long as the 
-adress is near the users current stack pointer (within 32 bytes), then it is a 
+adress is near the users current stack pointer (within 32 bytes), then it's a 
 valid stack growth request.
 
 
@@ -289,25 +289,24 @@ valid stack growth request.
 
 >> B5: Explain the basics of how you plan to manage synchronization in your VM
 >> design.  In particular, explain how it will prevent deadlock. 
->> We use 3 locks for the swap_bitmap, frame_list, and file I/O. We ensure that
-only one process can deal with them at a time, preventing race conditions. We 
-also prevent the deadlock of when a system call holding a lock causes a page 
-fault, which then tries to acquire the same lock to load the page. We prevent 
-this by pinning which loads the necessary pages before locking.
+>> We use 3 locks for the swap_bitmap, frame_list, and file I/O. We make sure 
+that only one process can deal with them at a time, preventing race conditions.
+We also prevent the deadlock of when a system call holding a lock causes a 
+page fault, which then tries to acquire the same lock to load the page. We 
+prevent this by pinning which loads the necessary pages before locking.
 
 
 >> B6: A page fault in process P can cause another process Q's page
 >> to be evicted.  How will you ensure that Q cannot access or modify
 >> the page during the eviction process?  How will you avoid a race
 >> between P evicting Q's page and Q faulting the page back in?
->> 
-We ensure Q cannot access or modify the page during eviction by calling 
+>> We ensure Q cannot access or modify the page during eviction by calling 
 pagedir_clear_page() which invalidates Q's page table entry, causing any later 
 access by Q to trigger a page fault. The frame_lock protects frame table
 operations during eviction, and once the page table entry is cleared, Q's 
 access attempts will fault. To avoid the scenario where Q faults the page back 
 while P is evicting it, we set page_set_loaded to false during eviction. 
-Therefore, when Q faults after eveiction, it sees that loaded = false and loads
+Therefore, when Q faults after eveiction, it sees that loaded=false and loads
 the page froms swap/file rather than acessing the evicted frame
 
 
