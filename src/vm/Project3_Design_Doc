@@ -134,33 +134,40 @@ Unique Number: 54895
 
 >> A2: What data will be necessary when a process page faults in the 
 >> code segment? How will your implementation locate that necessary data?
->>      
-        When a process page faults in the code segment, the handler needs the SPT entry for the faulting virtual address. This includes
-        the type of Page, a file pointer to the executable, the file offset, read_bytes + zero_bytes, the writable flag, and the loaded the flag.
-        The handler then calls this entry during page_lookup() with the faulting address which returns a struct page* for that virtual page. If NULL is returned,
-        this means the access is either invalid or we need to grow our stack.
-
+>> When a process page faults in the code segment, the handler needs the SPT 
+entry for the faulting virtual address. This includes the type of Page, a file 
+pointer to the executable, the file offset,  read_bytes + zero_bytes, the 
+writable flag, and the loaded the flag. The handler then calls this entry 
+during page_lookup() with the faulting address which returns a struct page* for
+that virtual page. If NULL is returned, this means the access is either invalid
+or we need to grow our stack.
 
 
 
 >> A3: How will your code coordinate accessed and dirty bits between
 >> kernel and user virtual addresses that are aliases for the same
 >> frame, or alternatively how do you plan to avoid the issue?
->>
-        We check both aliased addresses when reading dirty bits during eviction. In frame_evict(), we check the dirty bit for both the user virtual address
-        and the kernel virtual address using pagedir_is_dirty(). For the accessed bit, we check only the user virtual address which is fine since user accesses
-        set it. To prevent eviction during critical operations, we pin frames using frame_pin() when the kernel access user data, ensuring frames aren't evicted
-        while being accessed by kernel code
+>> We check both aliased addresses when reading dirty bits during eviction. In 
+frame_evict(), we check the dirty bit for both the user virtual address and the
+kernel virtual address using pagedir_is_dirty(). For the accessed bit, we check
+only the user virtual address which is fine since user accesses set it. To 
+prevent eviction during critical operations, we pin frames using frame_pin() 
+when the kernel access user data, ensuring frames aren't evicted while being 
+accessed by kernel code.
+        
 
 ---- SYNCHRONIZATION ----
 
 
 >> A4: When two user processes both need a new frame at the same time,
 >> what race conditions are possible?  How will they be avoided?
->>
-        When two processes need a new frame simultaneously, we see the potential for a few race conditions. Both processes might call frame_alloc() when
-        no free frames are avaliable, both might try evicting the exact same frame while one might try to evict a frame another is trying to access. We prevent
-        these conditions from occuring using a frame_lock that protects all frame table operations. This helps prevent dangerous race conditions with frame operations from occuring
+>> When two processes need a new frame simultaneously, we see the potential for
+a few race conditions. Both processes might call frame_alloc() when no free 
+frames are avaliable, both might try evicting the exact same frame while one 
+might try to evict a frame another is trying to access. We prevent these 
+conditions from occuring using a frame_lock that protects all frame table 
+operations. This helps prevent race conditions with frame operations from 
+happening.
 
 
 
