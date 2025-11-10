@@ -120,8 +120,7 @@ void *frame_alloc(void *upage, bool zero)
       PANIC("Eviction failed, out of memory and swap");
     }
 
-    /* If the original request wanted a zeroed page,
-       zero the newly-evicted (and possibly dirty) frame. */
+   
     if (zero) {
         memset(kpage, 0, PGSIZE);
     }

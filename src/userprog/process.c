@@ -625,6 +625,9 @@ static bool setup_stack (void **esp, const char *cmdline)
       frame_free (kpage);
       return false;
     }
+  
+ 
+  memset(kpage, 0, PGSIZE);
     
   if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true)) {
     frame_free (kpage);
@@ -778,6 +781,10 @@ bool grow_stack (void *fault_addr, void *esp) {
     page_remove(&cur->spt, fault_page);
     return false;
   }
+
+  // Zero the frame if it was evicted (palloc with PAL_ZERO would have zeroed a fresh page)
+  // We need to ensure the frame is zeroed for a zero page
+  memset(kpage, 0, PGSIZE);
 
   //install the page into the page directory
   if(!pagedir_set_page(cur->pagedir, fault_page, kpage, true)) {
