@@ -136,7 +136,7 @@ Unique Number: 54895
 >> code segment? How will your implementation locate that necessary data?
 >> When a process page faults in the code segment, the handler needs the SPT 
 entry for the faulting virtual address. This includes the type of Page, a file 
-pointer to the executable, the file offset,  read_bytes + zero_bytes, the 
+pointer to the executable, the file offset, read_bytes + zero_bytes, the 
 writable flag, and the loaded the flag. The handler then calls this entry 
 during page_lookup() with the faulting address which returns a struct page* for
 that virtual page. If NULL is returned, this means the access is either invalid
@@ -152,7 +152,7 @@ frame_evict(), we check the dirty bit for both the user virtual address and the
 kernel virtual address using pagedir_is_dirty(). For the accessed bit, we check
 only the user virtual address which is fine since user accesses set it. To 
 prevent eviction during critical operations, we pin frames using frame_pin() 
-when the kernel access user data, ensuring frames aren't evicted while being 
+when the kernel access user data, so frames aren't evicted while being 
 accessed by kernel code.
         
 
