@@ -210,9 +210,8 @@ void *frame_evict(void)
   
   lock_release(&frame_lock);
   
-  /* We have a victim, now process it */
-  
-  // check if owner has exited (pagedir is NULL) - if so, just free the frame 
+  // process victim
+  // check if owner has exited (pagedir is NULL), if so, just free frame 
   if (victim->owner == NULL || victim->owner->pagedir == NULL) {
     void *kpage = victim->kpage;
     free(victim);
@@ -222,19 +221,19 @@ void *frame_evict(void)
   // find its SPT entry (from the VICTIM'S owner)
   struct page *p = page_lookup(&victim->owner->spt, victim->upage);
   if (p == NULL) {
-    // SPT might have been destroyed - just free the frame
+    // SPT might have been destroyed, just free frame
     void *kpage = victim->kpage;
     free(victim);
     return kpage;
   }
 
-  // check if dirty (must check both aliased addresses)
   if (victim->owner == NULL || victim->owner->pagedir == NULL) {
     void *kpage = victim->kpage;
     free(victim);
     return kpage;
   }
   
+  // check if dirty (must check both aliased addresses)
   bool dirty = pagedir_is_dirty(victim->owner->pagedir, victim->upage) ||
                pagedir_is_dirty(victim->owner->pagedir, victim->kpage);
 
