@@ -40,12 +40,14 @@ void frame_free(void *kpage)
 {
   if (kpage == NULL) return;
   lock_acquire(&frame_lock);
+
   struct frame *fr = frame_find(kpage);
   if (fr != NULL)
     {
       list_remove(&fr->elem);
       free(fr);
     }
+
   lock_release(&frame_lock);
   palloc_free_page(kpage);
 }
@@ -53,6 +55,7 @@ void frame_free(void *kpage)
 void frame_remove_owner(struct thread *t)
 {
   lock_acquire(&frame_lock);
+
   struct list_elem *e = list_begin(&frame_list);
   while (e != list_end(&frame_list))
     {
@@ -69,12 +72,13 @@ void frame_remove_owner(struct thread *t)
                 clock_hand = list_begin(&frame_list);
             }
           list_remove(e);
-          /* Do not free kpage here; pagedir_destroy will free pages.
-             We only drop tracking metadata to avoid dangling references. */
+          /* Don't free kpage here; pagedir_destroy will free pages.
+             Only drop tracking metadata to avoid dangling references. */
           free(fr);
         }
       e = next;
     }
+
   lock_release(&frame_lock);
 }
 
@@ -95,10 +99,8 @@ void frame_unpin(void *kpage)
 }
 
 
-void *frame_alloc(void *upage, bool writable, bool zero)
+void *frame_alloc(void *upage, bool zero)
 {
-  (void)writable; /* Not used in this implementation */
-
   enum palloc_flags flags = PAL_USER | (zero ? PAL_ZERO : 0);
   void *kpage = palloc_get_page(flags);
 

@@ -19,7 +19,7 @@ struct frame {
 void frame_table_init(void);
 
 //allocate a frame and its user page
-void *frame_alloc(void *upage, bool writable, bool zero);
+void *frame_alloc(void *upage, bool zero);
 
 //free frame and its page
 void frame_free(void *kpage);

@@ -238,7 +238,7 @@ static void page_fault (struct intr_frame *f)
   }
 
   //allocate a physical frame for the page
-  void *kpage = frame_alloc(p -> upage, p -> writable, false);
+  void *kpage = frame_alloc(p -> upage, false);
   if(kpage == NULL) {
    printf ("Page fault at %p: no memory for page.\n", fault_addr);
    kill(f);

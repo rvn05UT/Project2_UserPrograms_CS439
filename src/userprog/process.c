@@ -619,7 +619,7 @@ static bool setup_stack (void **esp, const char *cmdline)
   argv[argc] = NULL; // Null-terminate the array
 
   // Allocate and map stack page
-  kpage = frame_alloc (((uint8_t *) PHYS_BASE) - PGSIZE, true, true);
+  kpage = frame_alloc (((uint8_t *) PHYS_BASE) - PGSIZE, true);
   if (kpage == NULL)
     {
       frame_free (kpage);
@@ -773,7 +773,7 @@ bool grow_stack (void *fault_addr, void *esp) {
   }
 
   //allocate a physical frame for the page
-  void *kpage = frame_alloc(fault_page, true, true);
+  void *kpage = frame_alloc(fault_page, true);
   if(kpage == NULL) {
     page_remove(&cur->spt, fault_page);
     return false;
