@@ -111,12 +111,12 @@ void *frame_alloc(void *upage, bool zero)
 
   if (kpage == NULL) 
   {
-    /* Out of free frames, evict one. */
+    // out of free frames, evict one
     kpage = frame_evict(); 
     
     //evict failure
     if (kpage == NULL) {
-      /* Eviction failed (prob swap is full). */
+      // eviction failed (prob swap is full)
       PANIC("VM: Eviction failed, out of memory and swap!");
     }
 
