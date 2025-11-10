@@ -110,23 +110,22 @@ void *frame_alloc(void *upage, bool zero)
 
   if (kpage == NULL) 
   {
-    /* --- EVICTION TRIGGER --- */
-    /* We are out of free frames. Evict one. */
+    /* Out of free frames, evict one. */
     kpage = frame_evict(); 
     
     if (kpage == NULL) {
-      /* Eviction failed (e.g., swap is full). */
+      /* Eviction failed (prob swap is full). */
       PANIC("VM: Eviction failed, out of memory and swap!");
     }
 
-    /* If the original request wanted a zeroed page, we must
+    /* If the original request wanted a zeroed page,
        zero the newly-evicted (and possibly dirty) frame. */
     if (zero) {
         memset(kpage, 0, PGSIZE);
     }
   }
 
-  /* Now that we have a valid kpage, track its metadata */
+  /* Track valid kpage metadata */
   struct frame *fr = malloc(sizeof *fr);
   if (fr == NULL)
   {
