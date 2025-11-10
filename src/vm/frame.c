@@ -102,10 +102,6 @@ void frame_unpin(void *kpage)
 
 void *frame_alloc(void *upage, bool zero)
 {
-  if (!upage){
-    return NULL;
-  }
-
   if(upage == NULL) {
     return NULL;
   }
