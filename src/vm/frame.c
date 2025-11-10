@@ -117,7 +117,7 @@ void *frame_alloc(void *upage, bool zero)
     //evict failure
     if (kpage == NULL) {
       // eviction failed (prob swap is full)
-      PANIC("VM: Eviction failed, out of memory and swap!");
+      PANIC("Eviction failed, out of memory and swap");
     }
 
     /* If the original request wanted a zeroed page,
@@ -305,7 +305,7 @@ void vm_unpin_buffer(const void *uaddr, size_t size)
 
   for (uint8_t *p = pg_round_down(start); p <= pg_round_down(end); p += PGSIZE) {
     void *kpage = pagedir_get_page(t->pagedir, p);
-    
+
     if (kpage != NULL)
       frame_unpin(kpage);
   }
