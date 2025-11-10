@@ -245,6 +245,9 @@ static void page_fault (struct intr_frame *f)
    return;
   }
 
+  // pin the frame while we populate it to avoid race conditions
+  frame_pin(kpage);
+
   //load the page data into the frame
 
   //if the page is a file, read the data from the executable
@@ -257,6 +260,7 @@ static void page_fault (struct intr_frame *f)
         if (file_read_at (p->file, kpage, p->read_bytes, p->file_ofs) != (int) p->read_bytes)
           {
             lock_release (&filesys_lock);
+            frame_unpin(kpage);
             frame_free (kpage);
             printf ("Page fault at %p: failed to read from file.\n", fault_addr);
             kill (f);
@@ -280,6 +284,7 @@ static void page_fault (struct intr_frame *f)
   }
   else
   {
+    frame_unpin(kpage);
     frame_free (kpage);
     printf ("Page fault at %p: unknown page type.\n", fault_addr);
     kill (f);
@@ -289,6 +294,7 @@ static void page_fault (struct intr_frame *f)
    //install the page into the page directory
    if (!pagedir_set_page (cur->pagedir, p->upage, kpage, p->writable))
    {
+      frame_unpin(kpage);
       frame_free (kpage);
       printf ("Page fault at %p: failed to install page.\n", fault_addr);
       kill (f);
@@ -297,6 +303,7 @@ static void page_fault (struct intr_frame *f)
 
    //mark the page as loaded
    page_set_loaded (p, true);
+   frame_unpin(kpage);
 
 }
 
