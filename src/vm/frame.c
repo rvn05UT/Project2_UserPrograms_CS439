@@ -52,7 +52,7 @@ void frame_free(void *kpage)
   palloc_free_page(kpage);
 }
 
-//remove owner metadata for a frame
+//remove owner metadata for a frame (called in process_exit)
 void frame_remove_owner(struct thread *t)
 {
   lock_acquire(&frame_lock);
@@ -204,7 +204,7 @@ void *frame_evict(void)
         break; 
       }
     }
-    
+    // just keep swimming
     clock_hand = next_hand;
   }
   
