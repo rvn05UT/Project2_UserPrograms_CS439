@@ -127,7 +127,7 @@ void *frame_alloc(void *upage, bool zero)
     }
   }
 
-  /* Track valid kpage metadata */
+  // track valid kpage metadata
   struct frame *fr = malloc(sizeof *fr);
   if (fr == NULL)
   {
@@ -175,29 +175,29 @@ void *frame_evict(void)
     
 
     struct frame *fr = list_entry(clock_hand, struct frame, elem);
-    /* Save next element before we potentially remove 'fr' */
+    // save next element before we potentially remove fr
     struct list_elem *next_hand = list_next(clock_hand);
 
     if (!fr->pinned) 
     {
-      /* Check if owner's page directory is still valid */
+      // check if owner's page directory is still valid 
       if (fr->owner == NULL || fr->owner->pagedir == NULL) {
-        /* Owner has exited - this frame can be evicted immediately */
+        // owner exited, this frame can be evicted immediately
         victim = fr;
         list_remove(&victim->elem);
         clock_hand = next_hand;
         break;
       }
       
-      //check and clear accessed bit
+      // check and clear accessed bit
       if (pagedir_is_accessed(fr->owner->pagedir, fr->upage)) 
       {
-        //clear accessed bit
+        //c lear accessed bit
         pagedir_set_accessed(fr->owner->pagedir, fr->upage, false);
       } 
       else 
       {
-        /* Not accessed: this is our victim. */
+        // not accessed, this is our victim
         victim = fr;
         list_remove(&victim->elem); // Remove from frame table
         clock_hand = next_hand;     // Advance clock hand
@@ -210,25 +210,25 @@ void *frame_evict(void)
   
   lock_release(&frame_lock);
   
-  /* We have a victim. Now process it (no lock needed). */
+  /* We have a victim, now process it */
   
-  /* Check if owner has exited (pagedir is NULL) - if so, just free the frame */
+  // check if owner has exited (pagedir is NULL) - if so, just free the frame 
   if (victim->owner == NULL || victim->owner->pagedir == NULL) {
     void *kpage = victim->kpage;
     free(victim);
     return kpage;
   }
   
-  /* Find its SPT entry (from the VICTIM'S owner) */
+  // find its SPT entry (from the VICTIM'S owner)
   struct page *p = page_lookup(&victim->owner->spt, victim->upage);
   if (p == NULL) {
-    /* SPT might have been destroyed - just free the frame */
+    // SPT might have been destroyed - just free the frame
     void *kpage = victim->kpage;
     free(victim);
     return kpage;
   }
 
-  /* Check if dirty (must check both aliased addresses) */
+  // check if dirty (must check both aliased addresses)
   if (victim->owner == NULL || victim->owner->pagedir == NULL) {
     void *kpage = victim->kpage;
     free(victim);
