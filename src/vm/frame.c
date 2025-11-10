@@ -246,19 +246,18 @@ void *frame_evict(void)
       p->page_slot = swap_out(victim->kpage);
     }
 
-  /* Update SPT: Mark as no longer loaded */
+  // update SPT, mark as no longer loaded
   page_set_loaded(p, false);
 
-  /* Unmap from hardware pagedir */
+  // unmap from hardware pagedir
   if (victim->owner != NULL && victim->owner->pagedir != NULL) {
     pagedir_clear_page(victim->owner->pagedir, victim->upage);
   }
 
-  //free victim metadata
+  // free victim metadata
   void *kpage = victim->kpage;
   free(victim);
 
-  /* 7. Return the freed kpage to frame_alloc */
   return kpage;
 
 }
@@ -266,20 +265,26 @@ void *frame_evict(void)
 /* Pin all pages in a user buffer to avoid recursive page faults while holding FS locks. */
 void vm_pin_buffer(const void *uaddr, size_t size, bool write_access)
 {
-  if (size == 0 || uaddr == NULL) return;
+  if (size == 0 || uaddr == NULL) {
+    return;
+  }
+
   struct thread *t = thread_current();
   uint8_t *start = (uint8_t *)uaddr;
   uint8_t *end = start + size - 1;
+
   for (uint8_t *p = pg_round_down(start); p <= pg_round_down(end); p += PGSIZE) {
     void *kpage = pagedir_get_page(t->pagedir, p);
+
     if (kpage == NULL) {
-      /* Force a page fault to load the page. */
-      volatile uint8_t tmp; /* Read triggers fault. */
+      // force a page fault to load the page.
+      volatile uint8_t tmp; // read triggers fault
       tmp = *(uint8_t *)p; (void)tmp;
       kpage = pagedir_get_page(t->pagedir, p);
       if (kpage == NULL)
-        return; /* Failed; process will die elsewhere. */
+        return; // failed, process will die somehwere else
     }
+
     frame_pin(kpage);
     if (write_access) {
       pagedir_set_dirty(t->pagedir, p, true);
@@ -290,12 +295,17 @@ void vm_pin_buffer(const void *uaddr, size_t size, bool write_access)
 /* Unpin previously pinned buffer pages. */
 void vm_unpin_buffer(const void *uaddr, size_t size)
 {
-  if (size == 0 || uaddr == NULL) return;
+  if (size == 0 || uaddr == NULL) {
+    return;
+  }
+
   struct thread *t = thread_current();
   uint8_t *start = (uint8_t *)uaddr;
   uint8_t *end = start + size - 1;
+
   for (uint8_t *p = pg_round_down(start); p <= pg_round_down(end); p += PGSIZE) {
     void *kpage = pagedir_get_page(t->pagedir, p);
+    
     if (kpage != NULL)
       frame_unpin(kpage);
   }
