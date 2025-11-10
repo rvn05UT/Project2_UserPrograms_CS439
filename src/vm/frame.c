@@ -22,7 +22,7 @@ void frame_table_init(void)
   lock_init(&frame_lock);
 }
 
-/* Find frame struct by kpage. */
+//find frame struct by kpage
 static struct frame *frame_find(void *kpage)
 {
   struct list_elem *e;
@@ -35,7 +35,7 @@ static struct frame *frame_find(void *kpage)
   return NULL;
 }
 
-
+//free the frame corresponding to the kpage
 void frame_free(void *kpage)
 {
   if (kpage == NULL) return;
@@ -52,6 +52,7 @@ void frame_free(void *kpage)
   palloc_free_page(kpage);
 }
 
+//remove owner metadata for a frame
 void frame_remove_owner(struct thread *t)
 {
   lock_acquire(&frame_lock);
@@ -63,17 +64,15 @@ void frame_remove_owner(struct thread *t)
       struct list_elem *next = list_next(e);
       if (fr->owner == t)
         {
-          /* If clock_hand points to this frame, advance it to the next element */
+          // ensure clock hand state
           if (clock_hand == e)
             {
               clock_hand = next;
-              /* If we removed the last element, reset clock_hand */
-              if (clock_hand == list_end(&frame_list))
+              if (clock_hand == list_end(&frame_list)) {
                 clock_hand = list_begin(&frame_list);
+              }
             }
           list_remove(e);
-          /* Don't free kpage here; pagedir_destroy will free pages.
-             Only drop tracking metadata to avoid dangling references. */
           free(fr);
         }
       e = next;
@@ -82,6 +81,7 @@ void frame_remove_owner(struct thread *t)
   lock_release(&frame_lock);
 }
 
+//pin a frame given by kpage
 void frame_pin(void *kpage)
 {
   lock_acquire(&frame_lock);
@@ -90,6 +90,7 @@ void frame_pin(void *kpage)
   lock_release(&frame_lock);
 }
 
+//unpin a frame given by kpage
 void frame_unpin(void *kpage)
 {
   lock_acquire(&frame_lock);
@@ -105,6 +106,10 @@ void *frame_alloc(void *upage, bool zero)
     return NULL;
   }
 
+  if(upage == NULL) {
+    return NULL;
+  }
+
   enum palloc_flags flags = PAL_USER | (zero ? PAL_ZERO : 0);
   void *kpage = palloc_get_page(flags);
 
@@ -113,6 +118,7 @@ void *frame_alloc(void *upage, bool zero)
     /* Out of free frames, evict one. */
     kpage = frame_evict(); 
     
+    //evict failure
     if (kpage == NULL) {
       /* Eviction failed (prob swap is full). */
       PANIC("VM: Eviction failed, out of memory and swap!");
@@ -132,6 +138,7 @@ void *frame_alloc(void *upage, bool zero)
     palloc_free_page(kpage);
     return NULL;
   }
+
   fr->kpage = kpage;
   fr->upage = upage;
   fr->owner = thread_current();
@@ -144,35 +151,36 @@ void *frame_alloc(void *upage, bool zero)
   return kpage;
 }
 
-
+// evict a frame that is not pinned with clock algo on accessed and dirty bits
 void *frame_evict(void)
 {
   lock_acquire(&frame_lock);
 
-  /* Initialize clock hand if this is the first eviction */
+  // ensure clock hand state
   if (clock_hand == NULL || clock_hand == list_end(&frame_list)) {
     clock_hand = list_begin(&frame_list);
   }
 
+  // check for empty list
+  if (list_empty(&frame_list)) {
+      lock_release(&frame_lock);
+      return NULL;
+  }
+
   struct frame *victim = NULL;
 
-  /* Clock algorithm: Loop until we find a victim */
+  // clock algo
   while (true) 
   {
-    /* Wrap around the list if we reach the end */
+    //wrap around
     if (clock_hand == list_end(&frame_list)) {
         clock_hand = list_begin(&frame_list);
     }
     
-    /* If the list is empty (shouldn't happen if we're evicting) */
-    if (list_empty(&frame_list)) {
-        lock_release(&frame_lock);
-        return NULL; /* Or PANIC */
-    }
 
     struct frame *fr = list_entry(clock_hand, struct frame, elem);
     /* Save next element before we potentially remove 'fr' */
-    struct list_elem *next_hand = list_next(clock_hand); 
+    struct list_elem *next_hand = list_next(clock_hand);
 
     if (!fr->pinned) 
     {
@@ -185,10 +193,10 @@ void *frame_evict(void)
         break;
       }
       
-      /* Check the accessed bit of the user page */
+      //check and clear accessed bit
       if (pagedir_is_accessed(fr->owner->pagedir, fr->upage)) 
       {
-        /* Give it a second chance: clear the accessed bit */
+        //clear accessed bit
         pagedir_set_accessed(fr->owner->pagedir, fr->upage, false);
       } 
       else 
@@ -250,7 +258,7 @@ void *frame_evict(void)
     pagedir_clear_page(victim->owner->pagedir, victim->upage);
   }
 
-  /* 6. Free the frame *metadata* (NOT the kpage) */
+  //free victim metadata
   void *kpage = victim->kpage;
   free(victim);
 

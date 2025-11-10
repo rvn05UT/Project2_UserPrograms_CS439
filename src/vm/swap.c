@@ -32,7 +32,6 @@ size_t swap_out(void *kpage) {
   size_t slot = bitmap_scan_and_flip(swap_bitmap, 0, 1, false);
   // check for error on failure (no free slots)
   if (slot == BITMAP_ERROR) {
-    // do I have to lock release here?
     PANIC("swap partiiton is full"); // panic the kernel
   }
 

@@ -8,8 +8,8 @@
 #include "threads/thread.h"
 
 enum type_of_page {
-    PAGE_FILE, //page backed by an executable segment
-    PAGE_SWAP,
+    PAGE_FILE, //page backed by a file
+    PAGE_SWAP, //page in swap
     PAGE_ZERO, //page zero filled 
 };
 
