@@ -1,4 +1,3 @@
-
                    +---------------------------+
                    |           CS 439          |
                    | PROJECT 3: VIRTUAL MEMORY |
@@ -60,9 +59,6 @@ Email: twanlc@utexas.edu
 Unique Number: 54895
 
 
-
-
-
 ---- PRELIMINARIES ----
 
 >> If you have any preliminary comments on your submission or notes for the
@@ -109,21 +105,27 @@ Unique Number: 54895
 
 >>    2) a few bullets or sentences about each data structure describing:
 >>        a) how it is populated,
-            - When we have an executable loading in process.c, page_create_file() creates entries for code segments. 
-            - When there is stack growth, page_create_zero() creates entries for new stack pages
+            - When we have an executable loading in process.c, 
+            page_create_file() creates entries for code segments. 
+            - When there is stack growth, page_create_zero() creates entries 
+            for new stack pages
             - Those entries are then installed via page_install()
 >>        b) how it is accessed,
             - With page_lookup, we can access them using the virtual address
             - The hash table has keys based on the user virtual address
 >>        c) how it is destroyed,
-            - page_table_destroy() calls on process exit, which calls hash_destroy with page_destructore to free the struct page entries
+            - page_table_destroy() calls on process exit, which calls 
+            hash_destroy with page_destructore to free the struct page entries
 >>        d) the expected size of that data structure,
-            - Each struct page is 40 bytes, total size varies with the number of pages per process
+            - Each struct page is 40 bytes, total size varies with the number 
+            of pages per process
 >>	  e) how many of that data structure you expect to exist in your
 >>           system, and 
-            -  There is one page table per process, we are storing it in our thread struct
+            -  There is one page table per process, we are storing it in our 
+            thread struct
 >>        f) how many processes could potentially touch that data.
-            - Ownly the process that owns the supplemental page table can access it
+            - Ownly the process that owns the supplemental page table can 
+            access it
 >>
 
 
@@ -207,16 +209,27 @@ Unique Number: 54895
 
 
 >> B1B: Consider the swap table. For this data structure, submit:
+        static struct block *swap_block;
+        static struct bitmap *swap_bitmap;
+        static struct lock swap_lock;
 >>
 >>    1) the C declarations of these data structures
 >>    2) a few bullets or sentences about each data structure describing:
 >>        a) how it is populated,
+             - the bitmap is populated when swap_out is called when a dirty frame is evicted.
+               It finds the first slot open and writes the swap_block based on the frame. Makes the bit true
 >>        b) how it is accessed,
->>        c) how it is destroyed,
+             -It is used by swap_out, swap_in, and swap_free 
+>>        c) how it is destroyed
+             - in bitmap is never destroyed, but slots are through swap_free, where the bit is set to false
 >>        d) the expected size of that data structure,
+             - Each swap_block is 4096 bytes
 >>        e) how many of that data structure you expect to exist in your
 >>           system, and 
+             _ only one bitmap and swap_lock, but many swap_blocks
 >>        f) how many processes could potentially touch that data.
+             - All process could touch the bitmap, based on if its corresponding frame gets evicted.
+ 
 >>
 
 
@@ -225,18 +238,25 @@ Unique Number: 54895
 
 >> B2: When a frame is required but none are free, some frame must be
 >> evicted.  Describe your algorithm for choosing a frame to evict.
->>
+>> - We use the clock hand algorithm while looping through the frame list. 
+We start iterating from the clock hand and skip all the pinned frames.
+ The victim is picked when it either has no owner or is not acessed. If the frame is
+acessed, we then set the acessed to 0 to give it a second chance. Once the victim is found,
+we remove it from the frame list and update the clock hand to the next frame.
+   
 
 
 >> B3: When a process P obtains a frame that was previously used by a
 >> process Q, how will you adjust the page table (and any other data
 >> structures) to reflect that Q no longer has the frame?
->>
+>>  
 
 
 >> B4: Explain your heuristic for deciding whether or not page fault 
 >> for an invalid virtual address should cause the stack to be extended.
->>
+>> We implement our heuristic in the grow_stack function which is called by the page_fault handler if the adress
+is not found. We first validate that the adress is in the user space and below the 8MB stack limit. Then as long as
+the adress is near the users current stack pointer (within 32 bytes), then it is a valid stack growth request.
 
 
 
@@ -245,21 +265,25 @@ Unique Number: 54895
 
 >> B5: Explain the basics of how you plan to manage synchronization in your VM
 >> design.  In particular, explain how it will prevent deadlock. 
->>
+>> We use 3 locks for the swap_bitmap, frame_list, and file I/O. We ensure that only one
+process can deal with them at a time, preventing race conditions. We also prevent the deadlock
+of when a system call holding a lock causes a page fault, which then tries to acquire the same
+lock to load the page. We prevent this by pinning which loads the necessary pages before locking.
 
 
 >> B6: A page fault in process P can cause another process Q's page
 >> to be evicted.  How will you ensure that Q cannot access or modify
 >> the page during the eviction process?  How will you avoid a race
 >> between P evicting Q's page and Q faulting the page back in?
->>
+>> 
 
 
 >> B7: Suppose a page fault in process P causes a page to be read from
 >> the filesystem or swap.  How will you ensure that a second process Q
 >> cannot interfere by, for example, attempting to evict a page while it is
 >> still being read in?
->>
+>> This cannot happen because the frame is currently pinned when being read, This 
+would prevent this frame from being evicted as no pinned frame could be evicted.
 
 
 >> B8: Explain how you handle access to paged-out pages that occur
@@ -267,5 +291,8 @@ Unique Number: 54895
 >> in user programs), or will you have a mechanism for "locking" frames
 >> into physical memory, or will you use some other design?  If your method
 >> could result in potential deadlock, how will you prevent it?  
->>
-
+>> We used pinning a page faults during a syscall would cause a deadlock. 
+Our read and write functions call vm_pin_buffer before acquiring the filesys_lock and 
+this helper function iterates through the user's buffer and intentionally triggers a page fault 
+for any page that is not currently loaded. This forces the page_fault handler to run 
+and load the page before any locks are held, preventing a deadlock.
