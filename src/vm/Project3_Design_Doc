@@ -1,0 +1,211 @@
+
+                   +---------------------------+
+                   |           CS 439          |
+                   | PROJECT 3: VIRTUAL MEMORY |
+                   |      DATA STRUCTURES      |
+                   |    AND DESIGN DOCUMENT    |
+                   +---------------------------+
+
+
+
+
+For this project, each group will need to submit a data structure and design
+milestone.  The questions in this design document should reflect the planned
+design of your project.  Your grade will reflect the quality of your answer in
+both clarity of communication and practicality of design.
+
+This design document will be completed and submitted as a group.  When you have
+completed your design submit it to the Canvas assignment Project 3 Data
+Structures and Design.
+
+We will return this milestone to you as quickly as possible so that you can get
+feedback on your design, but do not wait to begin your implementation. Please
+start your implementation as soon as you are finished designing your project.
+
+***Your submission must be a text file and each line must not extend past 80
+characters.  In addition, your submission must contain all of the original
+material and not exceed 12,500 characters.  The character count will be
+measured using the Linux command wc.  (Note that rtf files are NOT text files.)
+
+You may not use slip days on this portion of the project.
+
+
+
+---- Team Information  ----
+
+>> Fill your names, UT EIDs, CS logins, email addresses, and unique numbers:
+
+Name: Leonardo Leyva-Duenas
+EID: LDL2253
+CS login: leo14
+Email: leoleyva@utexas.edu
+Unique Number: 54885
+
+Name: Rishi Natarajan
+EID: RVN273
+CS login: rvn05
+Email: rishi.v.natarajan@gmail.com
+Unique Number: 54895
+
+Name: Samhith Konyala
+EID: SK62423
+CS login: Skon49
+Email: Samhith.Konyala@utexas.edu
+Unique Number: 54895
+
+Name: Tao
+EID: TLW3595
+CS login: taowan
+Email: twanlc@utexas.edu
+Unique Number: 54895
+
+
+
+
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission or notes for the
+>> TAs, please give them here.
+>>
+
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+>>
+
+
+>> Please paste a link to your GitLab repo below.
+>>
+
+
+
+                        PAGE TABLE MANAGEMENT
+                        =====================
+
+
+---- DATA STRUCTURES ----
+
+
+>> A1: Consider the supplemental page table. For this data structure, submit:
+>>
+>>    1) the C declarations of these data structures
+>>    2) a few bullets or sentences about each data structure describing:
+>>        a) how it is populated,
+>>        b) how it is accessed,
+>>        c) how it is destroyed,
+>>        d) the expected size of that data structure,
+>>	  e) how many of that data structure you expect to exist in your
+>>           system, and 
+>>        f) how many processes could potentially touch that data.
+>>
+
+
+---- ALGORITHMS ----
+
+
+>> A2: What data will be necessary when a process page faults in the 
+>> code segment? How will your implementation locate that necessary data?
+>>
+
+
+
+>> A3: How will your code coordinate accessed and dirty bits between
+>> kernel and user virtual addresses that are aliases for the same
+>> frame, or alternatively how do you plan to avoid the issue?
+>>
+
+
+---- SYNCHRONIZATION ----
+
+
+>> A4: When two user processes both need a new frame at the same time,
+>> what race conditions are possible?  How will they be avoided?
+>>
+
+
+
+                       PAGING TO AND FROM DISK
+                       =======================
+
+---- DATA STRUCTURES ----
+
+
+>> B1A: Consider the frame table. For this data structure, submit:
+>>
+>>    1) the C declarations of these data structures
+>>    2) a few bullets or sentences about each data structure describing:
+>>        a) how it is populated,
+>>        b) how it is accessed,
+>>        c) how it is destroyed,
+>>        d) the expected size of that data structure,
+>>	  e) how many of that data structure you expect to exist in your
+>>           system, and 
+>>        f) how many processes could potentially touch that data.
+>>
+
+
+>> B1B: Consider the swap table. For this data structure, submit:
+>>
+>>    1) the C declarations of these data structures
+>>    2) a few bullets or sentences about each data structure describing:
+>>        a) how it is populated,
+>>        b) how it is accessed,
+>>        c) how it is destroyed,
+>>        d) the expected size of that data structure,
+>>        e) how many of that data structure you expect to exist in your
+>>           system, and 
+>>        f) how many processes could potentially touch that data.
+>>
+
+
+---- ALGORITHMS ----
+
+
+>> B2: When a frame is required but none are free, some frame must be
+>> evicted.  Describe your algorithm for choosing a frame to evict.
+>>
+
+
+>> B3: When a process P obtains a frame that was previously used by a
+>> process Q, how will you adjust the page table (and any other data
+>> structures) to reflect that Q no longer has the frame?
+>>
+
+
+>> B4: Explain your heuristic for deciding whether or not page fault 
+>> for an invalid virtual address should cause the stack to be extended.
+>>
+
+
+
+---- SYNCHRONIZATION ----
+
+
+>> B5: Explain the basics of how you plan to manage synchronization in your VM
+>> design.  In particular, explain how it will prevent deadlock. 
+>>
+
+
+>> B6: A page fault in process P can cause another process Q's page
+>> to be evicted.  How will you ensure that Q cannot access or modify
+>> the page during the eviction process?  How will you avoid a race
+>> between P evicting Q's page and Q faulting the page back in?
+>>
+
+
+>> B7: Suppose a page fault in process P causes a page to be read from
+>> the filesystem or swap.  How will you ensure that a second process Q
+>> cannot interfere by, for example, attempting to evict a page while it is
+>> still being read in?
+>>
+
+
+>> B8: Explain how you handle access to paged-out pages that occur
+>> during system calls.  Will you use page faults to bring in pages (as
+>> in user programs), or will you have a mechanism for "locking" frames
+>> into physical memory, or will you use some other design?  If your method
+>> could result in potential deadlock, how will you prevent it?  
+>>
+
