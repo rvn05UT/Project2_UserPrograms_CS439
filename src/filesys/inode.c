@@ -7,6 +7,16 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
+// indirect block wrapper
+struct indirect_block {
+  block_sector_t direct[128];
+};
+
+// double indirect block wrapper
+struct doubly_indirect_block {
+  block_sector_t indirect[128];
+};
+
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
@@ -14,10 +24,12 @@
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
 {
-  block_sector_t start; /* First data sector. */
+  block_sector_t direct[12]; /* Direct sectors. blocks 0-11 */
+  block_sector_t indirect; /* indirect sector. blocks 12-139*/
+  block_sector_t double_indirect; /* doubly indirect sector. blocks 139 - 16522*/
   off_t length;         /* File size in bytes. */
   unsigned magic;       /* Magic number. */
-  uint32_t unused[125]; /* Not used. */
+  uint32_t unused[112]; /* Not used, ensures offset to 512 bytes */
 };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -45,10 +57,54 @@ struct inode
 static block_sector_t byte_to_sector (const struct inode *inode, off_t pos)
 {
   ASSERT (inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
-  else
+
+  if (pos < inode->data.length) {
+    size_t sector = pos / BLOCK_SECTOR_SIZE;
+    if (sector < 12) {
+      block_sector_t s = inode->data.direct[sector];
+      return s ? s : (block_sector_t)-1;
+
+    } 
+    else if (sector < 140) {
+      if(inode->data.indirect == 0) {
+        return (block_sector_t)-1;
+      }
+      //get direct by reading indirect
+      struct indirect_block indirect;
+      block_read(fs_device, inode->data.indirect, &indirect);
+      
+      block_sector_t s = indirect.direct[sector - 12];
+      return s ? s : (block_sector_t)-1;
+
+    } else {
+      if(inode->data.double_indirect == 0) {
+        return (block_sector_t)-1;
+      }
+
+      sector = sector - 140; //offset into doubly indirect
+      
+      size_t level_1 = sector / 128;
+      size_t level_2 = sector % 128;
+      //get double indirect
+      struct doubly_indirect_block d_indirect;
+      block_read(fs_device, inode->data.double_indirect, &d_indirect);
+      //get indirect from double indirect
+      block_sector_t indirect_sec = d_indirect.indirect[level_1];
+      if(indirect_sec == 0) {
+        return (block_sector_t)-1;
+      }
+      struct indirect_block indirect;
+      block_read(fs_device, indirect_sec, &indirect);
+
+      block_sector_t s = indirect.direct[level_2];
+      return s ? s : (block_sector_t)-1;
+    }
+
     return -1;
+  }
+  else {
+    return -1;
+  }
 }
 
 /* List of open inodes, so that opening a single inode twice
@@ -57,6 +113,47 @@ static struct list open_inodes;
 
 /* Initializes the inode module. */
 void inode_init (void) { list_init (&open_inodes); }
+
+//heler: ensures a block is allocated
+static bool alloc_data_block (block_sector_t *out)
+{
+  if (!free_map_allocate (1, out))
+    return false;
+  char zeros[BLOCK_SECTOR_SIZE];
+  block_write (fs_device, *out, zeros);
+  return true;
+}
+
+//helper: ensures an indirect block is allocated
+static bool ensure_indirect (block_sector_t *indirect_sec)
+{
+  //already allocated
+  if (*indirect_sec != 0) {
+    return true;
+  }
+  if (!free_map_allocate (1, indirect_sec)) {
+    return false;
+  }
+  struct indirect_block indirect;
+  memset (&indirect, 0, sizeof indirect);
+  block_write (fs_device, *indirect_sec, &indirect);
+  return true;
+}
+
+//helper: ensures a double indirect block is allocated
+static bool ensure_double_indirect (block_sector_t *double_indirect_sec)
+{
+  if (*double_indirect_sec != 0) {
+    return true;
+  }
+  if (!free_map_allocate (1, double_indirect_sec)) {
+    return false;
+  }
+  struct doubly_indirect_block d_indirect;
+  memset (&d_indirect, 0, sizeof d_indirect);
+  block_write (fs_device, *double_indirect_sec, &d_indirect);
+  return true;
+}
 
 /* Initializes an inode with LENGTH bytes of data and
    writes the new inode to sector SECTOR on the file system

@@ -1,0 +1,328 @@
++---------------------------+
+                   |           CS 439          |
+                   | PROJECT 3: VIRTUAL MEMORY |
+                   |      DATA STRUCTURES      |
+                   |    AND DESIGN DOCUMENT    |
+                   +---------------------------+
+
+
+
+
+For this project, each group will need to submit a data structure and design
+milestone.  The questions in this design document should reflect the planned
+design of your project.  Your grade will reflect the quality of your answer in
+both clarity of communication and practicality of design.
+
+This design document will be completed and submitted as a group.  When you have
+completed your design submit it to the Canvas assignment Project 3 Data
+Structures and Design.
+
+We will return this milestone to you as quickly as possible so that you can get
+feedback on your design, but do not wait to begin your implementation. Please
+start your implementation as soon as you are finished designing your project.
+
+***Your submission must be a text file and each line must not extend past 80
+characters.  In addition, your submission must contain all of the original
+material and not exceed 12,500 characters.  The character count will be
+measured using the Linux command wc.  (Note that rtf files are NOT text files.)
+
+You may not use slip days on this portion of the project.
+
+
+
+---- Team Information  ----
+
+>> Fill your names, UT EIDs, CS logins, email addresses, and unique numbers:
+
+Name: Leonardo Leyva-Duenas
+EID: LDL2253
+CS login: leo14
+Email: leoleyva@utexas.edu
+Unique Number: 54885
+
+Name: Rishi Natarajan
+EID: RVN273
+CS login: rvn05
+Email: rishi.v.natarajan@gmail.com
+Unique Number: 54895
+
+Name: Samhith Konyala
+EID: SK62423
+CS login: Skon49
+Email: Samhith.Konyala@utexas.edu
+Unique Number: 54895
+
+Name: Tao
+EID: TLW3595
+CS login: taowan
+Email: twanlc@utexas.edu
+Unique Number: 54895
+
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission or notes for the
+>> TAs, please give them here.
+>>
+
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+>>
+
+
+>> Please paste a link to your GitLab repo below.
+>>
+
+
+
+                        PAGE TABLE MANAGEMENT
+                        =====================
+
+
+---- DATA STRUCTURES ----
+
+
+>> A1: Consider the supplemental page table. For this data structure, submit:
+>>
+>>    1) the C declarations of these data structures
+        struct hash spt;  
+
+        struct page {
+            void *upage;              
+            enum type_of_page type;   
+            bool writable;            
+            bool loaded;              
+            struct hash_elem elem;    
+            
+            struct file *file;        
+            off_t file_ofs;           
+            uint32_t read_bytes;      
+            uint32_t zero_bytes;      
+            size_t page_slot;         
+        };
+
+>>    2) a few bullets or sentences about each data structure describing:
+>>        a) how it is populated,
+            - When we have an executable loading in process.c, 
+            page_create_file() creates entries for code segments. 
+            - When there is stack growth, page_create_zero() creates entries 
+            for new stack pages
+            - Those entries are then installed via page_install()
+>>        b) how it is accessed,
+            - With page_lookup, we can access them using the virtual address
+            - The hash table has keys based on the user virtual address
+>>        c) how it is destroyed,
+            - page_table_destroy() calls on process exit, which calls 
+            hash_destroy with page_destructore to free the struct page entries
+>>        d) the expected size of that data structure,
+            - Each struct page is 40 bytes, total size varies with the number 
+            of pages per process
+>>    e) how many of that data structure you expect to exist in your
+>>           system, and 
+            -  There is one page table per process, we are storing it in our 
+            thread struct
+>>        f) how many processes could potentially touch that data.
+            - Ownly the process that owns the supplemental page table can 
+            access it
+>>
+
+
+---- ALGORITHMS ----
+
+
+>> A2: What data will be necessary when a process page faults in the 
+>> code segment? How will your implementation locate that necessary data?
+>> When a process page faults in the code segment, the handler needs the SPT 
+entry for the faulting virtual address. This includes the type of Page, a file 
+pointer to the executable, the file offset,  read_bytes + zero_bytes, the 
+writable flag, and the loaded the flag. The handler then calls this entry 
+during page_lookup() with the faulting address which returns a struct page* for
+that virtual page. If NULL is returned, this means the access is either invalid
+or we need to grow our stack.
+
+
+
+>> A3: How will your code coordinate accessed and dirty bits between
+>> kernel and user virtual addresses that are aliases for the same
+>> frame, or alternatively how do you plan to avoid the issue?
+>> We check both aliased addresses when reading dirty bits during eviction. In 
+frame_evict(), we check the dirty bit for both the user virtual address and the
+kernel virtual address using pagedir_is_dirty(). For the accessed bit, we check
+only the user virtual address which is fine since user accesses set it. To 
+prevent eviction during critical operations, we pin frames using frame_pin() 
+when the kernel access user data, ensuring frames aren't evicted while being 
+accessed by kernel code.
+        
+
+---- SYNCHRONIZATION ----
+
+
+>> A4: When two user processes both need a new frame at the same time,
+>> what race conditions are possible?  How will they be avoided?
+>> When two processes need a new frame simultaneously, we see the potential for
+a few race conditions. Both processes might call frame_alloc() when no free 
+frames are avaliable, both might try evicting the exact same frame while one 
+might try to evict a frame another is trying to access. We prevent these 
+conditions from occuring using a frame_lock that protects all frame table 
+operations. This helps prevent race conditions with frame operations from 
+happening.
+
+
+
+                       PAGING TO AND FROM DISK
+                       =======================
+
+---- DATA STRUCTURES ----
+
+
+>> B1A: Consider the frame table. For this data structure, submit:
+>>
+>>    1) the C declarations of these data structures
+            static struct list frame_list;
+            static struct lock frame_lock;
+            static struct list_elem *clock_hand;
+
+            struct frame {
+                void *kpage;               
+                void *upage;               
+                struct thread *owner;      
+                bool pinned;               
+                struct list_elem elem;     
+            };
+
+
+>>    2) a few bullets or sentences about each data structure describing:
+>>        a) how it is populated,
+            - When frame_alloc() allocates a frame, it creates a struct frame, 
+            sets our kpage, upage, owner and pinned, and then adds the frame
+            to the frame list
+>>        b) how it is accessed,
+            - frame_find() searches the list by kpage to locate a frame
+            - frame_evict goes through the list using the clock hand for victim
+            selection
+            - frame_pin and frame_unpin use frame_find to locate their frames
+
+>>        c) how it is destroyed,
+            - frame_free removes and frees a single frame when we free a page
+            -  frame_remove_owner() removes and fress all frames owned by a 
+            process when exiting
+>>        d) the expected size of that data structure,
+            - Each struct frame is 24 bytes
+>>        e) how many of that data structure you expect to exist in your
+>>           system, and 
+            - One global frame table exists for the system
+>>        f) how many processes could potentially touch that data.
+            - All process that allocate user pages touch the frame table
+>>
+
+
+>> B1B: Consider the swap table. For this data structure, submit:
+        static struct block *swap_block;
+        static struct bitmap *swap_bitmap;
+        static struct lock swap_lock;
+>>
+>>    1) the C declarations of these data structures
+>>    2) a few bullets or sentences about each data structure describing:
+>>        a) how it is populated,
+             - the bitmap is populated when swap_out is called when a dirty 
+             frame is evicted.
+             - It finds the first slot open and writes the swap_block based on 
+             the frame. Makes the bit true
+>>        b) how it is accessed,
+             -It is used by swap_out, swap_in, and swap_free 
+>>        c) how it is destroyed
+             - in bitmap is never destroyed, but slots are through swap_free, 
+             where the bit is set to false
+>>        d) the expected size of that data structure,
+             - Each swap_block is 4096 bytes
+>>        e) how many of that data structure you expect to exist in your
+>>           system, and 
+             _ only one bitmap and swap_lock, but many swap_blocks
+>>        f) how many processes could potentially touch that data.
+             - All process could touch the bitmap, based on if its 
+             corresponding frame gets evicted.
+ 
+>>
+
+
+---- ALGORITHMS ----
+
+
+>> B2: When a frame is required but none are free, some frame must be
+>> evicted.  Describe your algorithm for choosing a frame to evict.
+>> We use the clock hand algorithm while looping through the frame list. We 
+start iterating from the clock hand and skip all the pinned frames. The victim 
+is picked when it either has no owner or is not acessed. If the frame is
+acessed, we then set the acessed to 0 to give it a second chance. Once the 
+victim is found, we remove it from the frame list and update the clock hand to 
+the next frame.
+   
+
+
+>> B3: When a process P obtains a frame that was previously used by a
+>> process Q, how will you adjust the page table (and any other data
+>> structures) to reflect that Q no longer has the frame?
+>>  
+During eviction in frame_evict(), we unmap the page from Q's hardware page table using pagedir_clear_page() to clear the present bit,
+mark that Q's entry is not loaded and then remove the frame struct. When P allocates the frame, a new frame struct is created with P as the owner 
+and is added to the frame list. We then update P's page table when the page fault handler calls pagedir_set_page() to install the page
+
+
+
+
+>> B4: Explain your heuristic for deciding whether or not page fault 
+>> for an invalid virtual address should cause the stack to be extended.
+>> We implement our heuristic in the grow_stack function which is called by the
+page_fault handler if the adress is not found. We first validate that the 
+adress is in the user space and below the 8MB stack limit. Then as long as the 
+adress is near the users current stack pointer (within 32 bytes), then it is a 
+valid stack growth request.
+
+
+
+---- SYNCHRONIZATION ----
+
+
+>> B5: Explain the basics of how you plan to manage synchronization in your VM
+>> design.  In particular, explain how it will prevent deadlock. 
+>> We use 3 locks for the swap_bitmap, frame_list, and file I/O. We ensure that
+only one process can deal with them at a time, preventing race conditions. We 
+also prevent the deadlock of when a system call holding a lock causes a page 
+fault, which then tries to acquire the same lock to load the page. We prevent 
+this by pinning which loads the necessary pages before locking.
+
+
+>> B6: A page fault in process P can cause another process Q's page
+>> to be evicted.  How will you ensure that Q cannot access or modify
+>> the page during the eviction process?  How will you avoid a race
+>> between P evicting Q's page and Q faulting the page back in?
+>> 
+We ensure Q cannot access or modify the page during eviction by calling pagedir_clear_page() which invalidates 
+Q's page table entry, causing any later access by Q to trigger a page fault. The frame_lock protects frame table
+operations during eviction, and once the page table entry is cleared, Q's access attempts will fault. To avoid the scenario
+where Q faults the page back while P is evicting it, we set page_set_loaded to false during eviction. Therefore, when Q faults
+after eveiction, it sees that loaded = false and loads the page froms swap/file rather than acessing the evicted frame
+
+
+>> B7: Suppose a page fault in process P causes a page to be read from
+>> the filesystem or swap.  How will you ensure that a second process Q
+>> cannot interfere by, for example, attempting to evict a page while it is
+>> still being read in?
+>> This can't happen because the frame is currently pinned when being read. 
+This would prevent this frame from being evicted as no pinned frame could be 
+evicted.
+
+
+>> B8: Explain how you handle access to paged-out pages that occur
+>> during system calls.  Will you use page faults to bring in pages (as
+>> in user programs), or will you have a mechanism for "locking" frames
+>> into physical memory, or will you use some other design?  If your method
+>> could result in potential deadlock, how will you prevent it?  
+>> We used pinning a page faults during a syscall would cause a deadlock. Our 
+read and write functions call vm_pin_buffer before acquiring the filesys_lock 
+and this helper function iterates through the user's buffer and intentionally 
+triggers a page fault for any page that is not currently loaded. This forces 
+the page_fault handler to run and load the page before any locks are held, 
+preventing a deadlock.
