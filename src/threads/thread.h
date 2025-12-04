@@ -126,10 +126,18 @@ struct thread
   struct hash spt;
 
 #endif
+struct dir *cwd; // current working directory, NULL until set by filesys_init or from parent
+struct fd_entry *fd_list[128]; // list of open file descriptors
+
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };
+struct fd_entry {
+   bool is_dir;
+   struct file *file;
+   struct dir *dir;
+}
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

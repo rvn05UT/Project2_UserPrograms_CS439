@@ -40,6 +40,10 @@ int allocate_fd(struct file *file);
 struct file *get_file_by_fd(int fd);
 void close_fd(int fd);
 
+bool chdir(const char *dir);
+bool mkdir(const char *dir);
+bool path_res(const char *path, struct dir **parent, char **file_name);
+
 void syscall_init (void)
 {
   // initialize the file system lock
@@ -593,4 +597,113 @@ void close_fd(int fd) {
     if (fd < cur->fd_next)
       cur->fd_next = fd;
   }
+}
+static char *stringdup_kern(const char *s) {
+  size_t len = strlen(s) + 1;
+  char *copy = malloc(len);
+  if (copy == NULL)
+    return NULL;
+  memcpy(copy, s, len);
+  return copy;
+}
+
+bool path_resolve(const char *path, struct dir **parent, char **file_name) {
+  struct dir *cur = NULL;
+  char *copy = NULL;
+  char *token, *save_ptr;
+  bool success = false;
+
+  if (path == NULL || parent == NULL || file_name == NULL) {
+    return false;
+  }
+
+  copy = stringdup_kern(path);
+  if (copy == NULL) {
+    return false;
+  }
+
+  if (path[0] == '/') {
+    cur = dir_open_root();
+  } else {
+    struct thread *t = thread_current();
+    if (t->cwd != NULL) {
+      cur = dir_reopen(t->cwd);
+    } else {
+      cur = dir_open_root();
+    }
+  }
+
+  if (cur == NULL) {
+    free(copy);
+    return false;
+  }
+
+  if (strcmp(copy, "/") == 0 || strcmp(copy, "") == 0) {
+    file_name[0] = '\0';
+    *parent = cur;
+    free(copy);
+    return true;
+  }
+
+  token = strtok_r(copy, "/", &save_ptr);
+  char next_token_buf[NAME_MAX + 1]; // lebron TODO: set max
+  token = token; // to avoid unused variable warning
+
+  char *last_token = NULL;
+  char *tok = NULL;
+  tok = strtok_r(NULL, "/", &save_ptr);
+  while (tok != NULL) {
+    if (last_token != NULL) {
+      free(last_token);
+    }
+    last_token = stringdup_kern(tok);
+    char *next = strtok_r(NULL, "/", &save_ptr);
+    if (next != NULL) {
+      struct inode *inode = NULL;
+      if (!dir_lookup(cur, tok, &inode)) {
+        // No such component
+        dir_close(cur);
+        free(last_token);
+        free(copy);
+        return false;
+      }
+
+      //must be a directory
+      if (!inode_is_dir(inode)) {
+        inode_close(inode);
+        dir_close(cur);
+        free(last_token);
+        free(copy);
+        return false;
+      }
+
+      // move to next directory
+      struct dir *next_dir = dir_open(inode);
+      dir_close(cur);
+      cur = next_dir;
+      tok = next;
+      free(last_token);
+      last_token = stringdup_kern(tok);
+      tok = strtok_r(NULL, "/", &save_ptr);
+      continue;
+    }
+    else {
+      break; // last token
+    }
+
+  }
+  if (last_token == NULL) {
+    dir_close(cur);
+    free(copy);
+    return false;
+  }
+
+  strncpy(file_name, last_token, NAME_MAX + 1);
+  file_name[NAME_MAX] = '\0'; // ensure null-termination //lebron TODO: fix NAME_MAX
+  free(last_token);
+  *parent = cur;
+  free(copy);
+
+  
+  return true; 
 }
