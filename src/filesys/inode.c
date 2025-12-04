@@ -48,6 +48,7 @@ struct inode
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
+  struct lock inode_lock;   /* Lock for synchronizing access to inode */
 };
 
 /* Returns the block device sector that contains byte offset POS
@@ -353,6 +354,7 @@ struct inode *inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  lock_init (&inode->inode_lock);
   block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
@@ -416,6 +418,7 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size,
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
   uint8_t *bounce = NULL;
+  lock_acquire (&inode->inode_lock);
 
   while (size > 0)
     {
@@ -458,6 +461,7 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size,
       bytes_read += chunk_size;
     }
   free (bounce);
+  lock_release (&inode->inode_lock);
 
   return bytes_read;
 }
@@ -475,8 +479,9 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 
   if (inode->deny_write_cnt)
     return 0;
-
+  
   off_t new_length = offset + size;
+  lock_acquire (&inode->inode_lock);
   if (new_length > inode->data.length)
     {
       off_t old_length = inode->data.length;
@@ -597,6 +602,7 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     }
   
   free (bounce);
+  lock_release (&inode->inode_lock);
 
   return bytes_written;
 }
@@ -605,18 +611,23 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size,
    May be called at most once per inode opener. */
 void inode_deny_write (struct inode *inode)
 {
+  lock_acquire (&inode->inode_lock);
   inode->deny_write_cnt++;
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
+  lock_release (&inode->inode_lock);
 }
 
 /* Re-enables writes to INODE.
    Must be called once by each inode opener who has called
    inode_deny_write() on the inode, before closing the inode. */
 void inode_allow_write (struct inode *inode)
+
 {
+  lock_acquire (&inode->inode_lock);
   ASSERT (inode->deny_write_cnt > 0);
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
   inode->deny_write_cnt--;
+  lock_release (&inode->inode_lock);
 }
 
 /* Returns the length, in bytes, of INODE's data. */
