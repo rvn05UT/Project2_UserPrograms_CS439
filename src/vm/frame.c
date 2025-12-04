@@ -119,10 +119,6 @@ void *frame_alloc(void *upage, bool zero)
       // eviction failed (prob swap is full)
       PANIC("Eviction failed, out of memory and swap");
     }
-   
-    if (zero) {
-        memset(kpage, 0, PGSIZE);
-    }
   }
 
   // track valid kpage metadata
@@ -170,8 +166,6 @@ void *frame_evict(void)
     if (clock_hand == list_end(&frame_list)) {
         clock_hand = list_begin(&frame_list);
     }
-    
-
     struct frame *fr = list_entry(clock_hand, struct frame, elem);
     // save next element before we potentially remove fr
     struct list_elem *next_hand = list_next(clock_hand);
@@ -190,19 +184,19 @@ void *frame_evict(void)
       // check and clear accessed bit
       if (pagedir_is_accessed(fr->owner->pagedir, fr->upage)) 
       {
-        //c lear accessed bit
+        //clear accessed bit
         pagedir_set_accessed(fr->owner->pagedir, fr->upage, false);
       } 
       else 
       {
         // not accessed, this is our victim
         victim = fr;
-        list_remove(&victim->elem); // Remove from frame table
+        list_remove(&victim->elem);
         clock_hand = next_hand;     // Advance clock hand
         break; 
       }
     }
-    // just keep swimming
+    // just keep moving
     clock_hand = next_hand;
   }
   
@@ -216,16 +210,10 @@ void *frame_evict(void)
     return kpage;
   }
   
-  // find its SPT entry (from the VICTIM'S owner)
+  // find its SPT entry (from the victim's owner)
   struct page *p = page_lookup(&victim->owner->spt, victim->upage);
   if (p == NULL) {
     // SPT might have been destroyed, just free frame
-    void *kpage = victim->kpage;
-    free(victim);
-    return kpage;
-  }
-
-  if (victim->owner == NULL || victim->owner->pagedir == NULL) {
     void *kpage = victim->kpage;
     free(victim);
     return kpage;
@@ -235,8 +223,7 @@ void *frame_evict(void)
   bool dirty = pagedir_is_dirty(victim->owner->pagedir, victim->upage) ||
                pagedir_is_dirty(victim->owner->pagedir, victim->kpage);
 
-  /* If it's a clean file-backed page, we can just re-read from the file later.
-     Otherwise (dirty file-backed, zero, or swap), write to swap. */
+  //do not swap clean file backed pages
   if (p->type != PAGE_FILE || dirty)
     {
       p->type = PAGE_SWAP;
@@ -246,7 +233,7 @@ void *frame_evict(void)
   // update SPT, mark as no longer loaded
   page_set_loaded(p, false);
 
-  // unmap from hardware pagedir
+  // unmap from pagedir
   if (victim->owner != NULL && victim->owner->pagedir != NULL) {
     pagedir_clear_page(victim->owner->pagedir, victim->upage);
   }
@@ -259,7 +246,7 @@ void *frame_evict(void)
 
 }
 
-/* Pin all pages in a user buffer to avoid recursive page faults while holding FS locks. */
+// Pin all pages in a user buffer
 void vm_pin_buffer(const void *uaddr, size_t size, bool write_access)
 {
   if (size == 0 || uaddr == NULL) {
@@ -274,12 +261,12 @@ void vm_pin_buffer(const void *uaddr, size_t size, bool write_access)
     void *kpage = pagedir_get_page(t->pagedir, p);
 
     if (kpage == NULL) {
-      // force a page fault to load the page.
+      //force a page fault to load the page.
       volatile uint8_t tmp; // read triggers fault
       tmp = *(uint8_t *)p; (void)tmp;
       kpage = pagedir_get_page(t->pagedir, p);
       if (kpage == NULL)
-        return; // failed, process will die somehwere else
+        return;
     }
 
     frame_pin(kpage);
@@ -289,7 +276,7 @@ void vm_pin_buffer(const void *uaddr, size_t size, bool write_access)
   }
 }
 
-/* Unpin previously pinned buffer pages. */
+//unpin pinned pages
 void vm_unpin_buffer(const void *uaddr, size_t size)
 {
   if (size == 0 || uaddr == NULL) {

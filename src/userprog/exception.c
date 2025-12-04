@@ -249,7 +249,6 @@ static void page_fault (struct intr_frame *f)
   frame_pin(kpage);
 
   //load the page data into the frame
-
   //if the page is a file, read the data from the executable
   if(p->type == PAGE_FILE)
   {
