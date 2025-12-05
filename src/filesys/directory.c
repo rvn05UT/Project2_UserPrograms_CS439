@@ -5,6 +5,7 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 /* A directory. */
 struct dir
@@ -265,5 +266,265 @@ bool dir_is_empty(struct dir *dir)
             return false;
         }
       }
+  return true;
+}
+
+/* Normalizes a path by removing multiple consecutive slashes and trailing slashes.
+   Returns a newly allocated string that the caller must free. */
+static char *normalize_path (const char *path)
+{
+  if (path == NULL || *path == '\0')
+    return NULL;
+  
+  size_t len = strlen (path);
+  char *normalized = malloc (len + 1);
+  if (normalized == NULL)
+    return NULL;
+  
+  const char *src = path;
+  char *dst = normalized;
+  bool last_was_slash = false;
+  
+  while (*src != '\0')
+    {
+      if (*src == '/')
+        {
+          if (!last_was_slash)
+            {
+              *dst++ = '/';
+              last_was_slash = true;
+            }
+        }
+      else
+        {
+          *dst++ = *src;
+          last_was_slash = false;
+        }
+      src++;
+    }
+  
+  /* Remove trailing slash unless it's the root */
+  if (dst > normalized + 1 && *(dst - 1) == '/')
+    dst--;
+  
+  *dst = '\0';
+  return normalized;
+}
+
+/* Splits a path into directory path and file name.
+   Returns true on success, false on failure.
+   On success, *dir_path and *file_name are newly allocated strings that caller must free. */
+static bool split_path (const char *path, char **dir_path, char **file_name)
+{
+  if (path == NULL)
+    return false;
+  
+  char *normalized = normalize_path (path);
+  if (normalized == NULL)
+    return false;
+  
+  size_t len = strlen (normalized);
+  
+  /* Find the last slash */
+  const char *last_slash = strrchr (normalized, '/');
+  
+  if (last_slash == NULL)
+    {
+      /* No slash - entire path is the file name, directory is current directory */
+      *dir_path = malloc (2);
+      if (*dir_path != NULL)
+        strlcpy (*dir_path, ".", 2);
+      *file_name = malloc (strlen (normalized) + 1);
+      if (*file_name != NULL)
+        strlcpy (*file_name, normalized, strlen (normalized) + 1);
+    }
+  else if (last_slash == normalized)
+    {
+      /* Path starts with / and has no other slashes - root directory */
+      if (len == 1)
+        {
+          /* Just "/" - root directory itself */
+          *dir_path = malloc (2);
+          if (*dir_path != NULL)
+            strlcpy (*dir_path, "/", 2);
+          *file_name = malloc (1);
+          if (*file_name != NULL)
+            (*file_name)[0] = '\0';
+        }
+      else
+        {
+          /* "/filename" - root is directory, rest is filename */
+          *dir_path = malloc (2);
+          if (*dir_path != NULL)
+            strlcpy (*dir_path, "/", 2);
+          size_t file_name_len = strlen (normalized + 1) + 1;
+          *file_name = malloc (file_name_len);
+          if (*file_name != NULL)
+            strlcpy (*file_name, normalized + 1, file_name_len);
+        }
+    }
+  else
+    {
+      /* Has directory and file components */
+      size_t dir_len = last_slash - normalized;
+      *dir_path = malloc (dir_len + 1);
+      if (*dir_path == NULL)
+        {
+          free (normalized);
+          return false;
+        }
+      memcpy (*dir_path, normalized, dir_len);
+      (*dir_path)[dir_len] = '\0';
+      
+      size_t file_name_len = strlen (last_slash + 1) + 1;
+      *file_name = malloc (file_name_len);
+      if (*file_name != NULL)
+        strlcpy (*file_name, last_slash + 1, file_name_len);
+    }
+  
+  free (normalized);
+  return (*dir_path != NULL && *file_name != NULL);
+}
+
+/* Resolves a path (absolute or relative) and returns the directory and final component.
+   Returns true on success, false on failure.
+   On success, *dir is the directory (caller must close) and *name is the final component.
+   *name is a newly allocated string that caller must free. */
+bool get_dir_and_name (const char *path, struct dir **dir, char **name)
+{
+  if (path == NULL || *path == '\0')
+    return false;
+  
+  char *dir_path = NULL;
+  char *file_name = NULL;
+  
+  if (!split_path (path, &dir_path, &file_name))
+    return false;
+  
+  /* Resolve the directory path */
+  struct dir *resolved_dir = NULL;
+  
+  if (strcmp (dir_path, "/") == 0)
+    {
+      /* Root directory */
+      resolved_dir = dir_open_root ();
+    }
+  else if (strcmp (dir_path, ".") == 0)
+    {
+      /* Current directory */
+      struct thread *cur = thread_current ();
+      if (cur->cwd == NULL)
+        resolved_dir = dir_open_root ();
+      else
+        resolved_dir = dir_reopen (cur->cwd);
+    }
+  else
+    {
+      /* Need to resolve the path */
+      bool is_absolute = (*dir_path == '/');
+      struct dir *start_dir;
+      
+      if (is_absolute)
+        start_dir = dir_open_root ();
+      else
+        {
+          struct thread *cur = thread_current ();
+          if (cur->cwd == NULL)
+            start_dir = dir_open_root ();
+          else
+            start_dir = dir_reopen (cur->cwd);
+        }
+      
+      if (start_dir == NULL)
+        {
+          free (dir_path);
+          free (file_name);
+          return false;
+        }
+      
+      /* Tokenize the path and traverse */
+      char *save_ptr;
+      char *token = strtok_r (is_absolute ? dir_path + 1 : dir_path, "/", &save_ptr);
+      resolved_dir = start_dir;
+      
+      while (token != NULL)
+        {
+          struct inode *next_inode = NULL;
+          
+          if (strcmp (token, ".") == 0)
+            {
+              /* Stay in current directory */
+              token = strtok_r (NULL, "/", &save_ptr);
+              continue;
+            }
+          else if (strcmp (token, "..") == 0)
+            {
+              /* Go to parent directory */
+              struct inode *parent_inode = NULL;
+              if (dir_lookup (resolved_dir, "..", &parent_inode))
+                {
+                  dir_close (resolved_dir);
+                  resolved_dir = dir_open (parent_inode);
+                  if (resolved_dir == NULL)
+                    {
+                      inode_close (parent_inode);
+                      free (dir_path);
+                      free (file_name);
+                      return false;
+                    }
+                }
+              else
+                {
+                  dir_close (resolved_dir);
+                  free (dir_path);
+                  free (file_name);
+                  return false;
+                }
+            }
+          else
+            {
+              /* Look up the component */
+              if (!dir_lookup (resolved_dir, token, &next_inode))
+                {
+                  dir_close (resolved_dir);
+                  free (dir_path);
+                  free (file_name);
+                  return false;
+                }
+              
+              if (!is_inode_dir (next_inode))
+                {
+                  inode_close (next_inode);
+                  dir_close (resolved_dir);
+                  free (dir_path);
+                  free (file_name);
+                  return false;
+                }
+              
+              dir_close (resolved_dir);
+              resolved_dir = dir_open (next_inode);
+              if (resolved_dir == NULL)
+                {
+                  inode_close (next_inode);
+                  free (dir_path);
+                  free (file_name);
+                  return false;
+                }
+            }
+          
+          token = strtok_r (NULL, "/", &save_ptr);
+        }
+    }
+  
+  free (dir_path);
+  
+  if (resolved_dir == NULL)
+    {
+      free (file_name);
+      return false;
+    }
+  
+  *dir = resolved_dir;
+  *name = file_name;
   return true;
 }

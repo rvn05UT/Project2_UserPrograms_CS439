@@ -94,6 +94,11 @@ tid_t process_execute (const char *file_name)
       // link child status record to child thread
       child->cstatus = cur_status;
       child->parent = thread_current();
+      // inherit current working directory from parent
+      if (thread_current()->cwd != NULL)
+        child->cwd = dir_reopen (thread_current()->cwd);
+      else
+        child->cwd = NULL;
       // add to parent's children list
       list_push_back(&thread_current()->children, &cur_status->elem);
     }
@@ -120,6 +125,11 @@ static void start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  struct thread *cur = thread_current();
+
+  /* Initialize current working directory to root if not already set */
+  if (cur->cwd == NULL)
+    cur->cwd = dir_open_root ();
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -134,7 +144,6 @@ static void start_process (void *file_name_)
   }
   /* If load failed, quit. */
   // Note: file_name is now the original command line, not allocated with palloc
-  struct thread *cur = thread_current();
   sema_up(&cur->load_done);
   palloc_free_page (file_name);
   if (!success)

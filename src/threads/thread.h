@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#ifdef USERPROG
+#include "filesys/directory.h"
+#endif
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -122,6 +125,7 @@ struct thread
   struct semaphore load_done;      // semaphore for exec load completion
 
   struct child_status *cstatus;    // child's record in parent's children list
+  struct dir *cwd;                 // current working directory
 #endif
 
   /* Owned by thread.c. */

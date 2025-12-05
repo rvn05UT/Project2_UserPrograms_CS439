@@ -39,14 +39,34 @@ void filesys_done (void) { free_map_close (); }
    or if internal memory allocation fails. */
 bool filesys_create (const char *name, off_t initial_size)
 {
+  if (name == NULL || *name == '\0')
+    return false;
+  
+  struct dir *dir = NULL;
+  char *file_name = NULL;
+  bool success = false;
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
-  bool success = (dir != NULL && free_map_allocate (1, &inode_sector) &&
-                  inode_create (inode_sector, initial_size, false) &&
-                  dir_add (dir, name, inode_sector));
+  
+  if (!get_dir_and_name (name, &dir, &file_name))
+    return false;
+  
+  if (*file_name == '\0')
+    {
+      /* Cannot create a directory with this function */
+      dir_close (dir);
+      free (file_name);
+      return false;
+    }
+  
+  success = (dir != NULL && free_map_allocate (1, &inode_sector) &&
+             inode_create (inode_sector, initial_size, false) &&
+             dir_add (dir, file_name, inode_sector));
+  
   if (!success && inode_sector != 0)
     free_map_release (inode_sector, 1);
+  
   dir_close (dir);
+  free (file_name);
 
   return success;
 }
@@ -58,12 +78,32 @@ bool filesys_create (const char *name, off_t initial_size)
    or if an internal memory allocation fails. */
 struct file *filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
+  if (name == NULL || *name == '\0')
+    return NULL;
+  
+  struct dir *dir = NULL;
+  char *file_name = NULL;
   struct inode *inode = NULL;
-
+  
+  if (!get_dir_and_name (name, &dir, &file_name))
+    return NULL;
+  
+  if (*file_name == '\0')
+    {
+      /* Opening a directory - return the directory's inode as a file */
+      inode = dir_get_inode (dir);
+      if (inode != NULL)
+        inode_reopen (inode);
+      dir_close (dir);
+      free (file_name);
+      return file_open (inode);
+    }
+  
   if (dir != NULL)
-    dir_lookup (dir, name, &inode);
+    dir_lookup (dir, file_name, &inode);
+  
   dir_close (dir);
+  free (file_name);
 
   return file_open (inode);
 }
@@ -74,10 +114,75 @@ struct file *filesys_open (const char *name)
    or if an internal memory allocation fails. */
 bool filesys_remove (const char *name)
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
+  if (name == NULL || *name == '\0')
+    return false;
+  
+  struct dir *dir = NULL;
+  char *file_name = NULL;
+  bool success = false;
+  
+  if (!get_dir_and_name (name, &dir, &file_name))
+    return false;
+  
+  if (*file_name == '\0')
+    {
+      /* Cannot remove root directory */
+      dir_close (dir);
+      free (file_name);
+      return false;
+    }
+  
+  success = dir != NULL && dir_remove (dir, file_name);
+  
   dir_close (dir);
+  free (file_name);
 
+  return success;
+}
+
+/* Creates a directory named DIR.
+   Returns true if successful, false on failure.
+   Fails if a directory named DIR already exists,
+   or if any directory name in DIR, besides the last, does not already exist. */
+bool filesys_mkdir (const char *dir)
+{
+  if (dir == NULL || *dir == '\0')
+    return false;
+  
+  struct dir *parent_dir = NULL;
+  char *dir_name = NULL;
+  bool success = false;
+  block_sector_t inode_sector = 0;
+  
+  if (!get_dir_and_name (dir, &parent_dir, &dir_name))
+    return false;
+  
+  if (*dir_name == '\0')
+    {
+      /* Cannot create root directory */
+      dir_close (parent_dir);
+      free (dir_name);
+      return false;
+    }
+  
+  if (free_map_allocate (1, &inode_sector))
+    {
+      struct inode *parent_inode = dir_get_inode (parent_dir);
+      block_sector_t parent_sector = inode_get_inumber (parent_inode);
+      
+      if (dir_create (inode_sector, 16, parent_sector) &&
+          dir_add (parent_dir, dir_name, inode_sector))
+        {
+          success = true;
+        }
+      
+      if (!success && inode_sector != 0)
+        free_map_release (inode_sector, 1);
+    }
+  
+  dir_close (parent_dir);
+  free (dir_name);
+  
   return success;
 }
 

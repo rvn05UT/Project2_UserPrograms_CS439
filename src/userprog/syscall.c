@@ -9,6 +9,7 @@
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
 #include "lib/kernel/console.h"
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
@@ -34,6 +35,11 @@ static int exec (const char *cmd_line);
 static int wait (int child_tid);
 static int read (int fd, void *buffer, unsigned size);
 static int filesize_sys (int fd);
+static bool chdir_sys (const char *dir);
+static bool mkdir_sys (const char *dir);
+static bool readdir_sys (int fd, char *name);
+static bool isdir_sys (int fd);
+static int inumber_sys (int fd);
 int allocate_fd(struct file *file);
 struct file *get_file_by_fd(int fd);
 void close_fd(int fd);
@@ -299,8 +305,98 @@ static void syscall_handler (struct intr_frame *f)
           break;
         }
 
+      case SYS_CHDIR:
+        {
+          const char *dir;
+          if (!get_user_bytes ((uint8_t *) &dir, (uint8_t *) (esp + 1), sizeof (const char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          if (dir == NULL)
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_string (dir);
+          lock_acquire (&filesys_lock);
+          f->eax = chdir_sys (dir);
+          lock_release (&filesys_lock);
+          break;
+        }
+
+      case SYS_MKDIR:
+        {
+          const char *dir;
+          if (!get_user_bytes ((uint8_t *) &dir, (uint8_t *) (esp + 1), sizeof (const char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          if (dir == NULL)
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_string (dir);
+          lock_acquire (&filesys_lock);
+          f->eax = mkdir_sys (dir);
+          lock_release (&filesys_lock);
+          break;
+        }
+
+      case SYS_READDIR:
+        {
+          int fd;
+          char *name;
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)) ||
+              !get_user_bytes ((uint8_t *) &name, (uint8_t *) (esp + 2), sizeof (char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          if (name == NULL)
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_ptr (name);
+          lock_acquire (&filesys_lock);
+          f->eax = readdir_sys (fd, name);
+          lock_release (&filesys_lock);
+          break;
+        }
+
+      case SYS_ISDIR:
+        {
+          int fd;
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          lock_acquire (&filesys_lock);
+          f->eax = isdir_sys (fd);
+          lock_release (&filesys_lock);
+          break;
+        }
+
+      case SYS_INUMBER:
+        {
+          int fd;
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          lock_acquire (&filesys_lock);
+          f->eax = inumber_sys (fd);
+          lock_release (&filesys_lock);
+          break;
+        }
+
       default:
-        // unknown system call - terminate process (file system calls not implemented yet)
+        // unknown system call - terminate process
         printf ("%s: exit(-1)\n", thread_name ());
         thread_exit ();
     }
@@ -559,4 +655,91 @@ void close_fd(int fd) {
     if (fd < cur->fd_next)
       cur->fd_next = fd;
   }
+}
+
+static bool chdir_sys (const char *dir)
+{
+  if (dir == NULL)
+    return false;
+  
+  struct file *dir_file = filesys_open (dir);
+  if (dir_file == NULL)
+    return false;
+  
+  struct inode *inode = file_get_inode (dir_file);
+  if (!is_inode_dir (inode))
+    {
+      file_close (dir_file);
+      return false;
+    }
+  
+  struct thread *cur = thread_current ();
+  struct dir *new_cwd = dir_open (inode_reopen (inode));
+  file_close (dir_file);
+  
+  if (new_cwd == NULL)
+    return false;
+  
+  if (cur->cwd != NULL)
+    dir_close (cur->cwd);
+  
+  cur->cwd = new_cwd;
+  return true;
+}
+
+static bool mkdir_sys (const char *dir)
+{
+  if (dir == NULL)
+    return false;
+  
+  return filesys_mkdir (dir);
+}
+
+static bool readdir_sys (int fd, char *name)
+{
+  if (fd < 0 || fd > 128 || name == NULL)
+    return false;
+  
+  struct file *file = get_file_by_fd (fd);
+  if (file == NULL)
+    return false;
+  
+  struct inode *inode = file_get_inode (file);
+  if (!is_inode_dir (inode))
+    return false;
+  
+  struct dir *dir = dir_open (inode_reopen (inode));
+  if (dir == NULL)
+    return false;
+  
+  bool success = dir_readdir (dir, name);
+  dir_close (dir);
+  
+  return success;
+}
+
+static bool isdir_sys (int fd)
+{
+  if (fd < 0 || fd > 128)
+    return false;
+  
+  struct file *file = get_file_by_fd (fd);
+  if (file == NULL)
+    return false;
+  
+  struct inode *inode = file_get_inode (file);
+  return is_inode_dir (inode);
+}
+
+static int inumber_sys (int fd)
+{
+  if (fd < 0 || fd > 128)
+    return -1;
+  
+  struct file *file = get_file_by_fd (fd);
+  if (file == NULL)
+    return -1;
+  
+  struct inode *inode = file_get_inode (file);
+  return (int) inode_get_inumber (inode);
 }
