@@ -78,7 +78,7 @@ struct dir *dir_reopen (struct dir *dir)
   return dir_open (inode_reopen (dir->inode));
 }
 
-/* Destroys DIR and frees associated resources. */
+// closes the inode associated with the directory
 void dir_close (struct dir *dir)
 {
   if (dir != NULL)
@@ -205,13 +205,18 @@ bool dir_remove (struct dir *dir, const char *name)
     goto done;
   
   if (is_inode_dir(inode)) {
-      struct dir *sub_dir = dir_open(inode);
+      struct dir *sub_dir = dir_open(inode_reopen(inode));
       if (sub_dir == NULL) {
           goto done;
       }
       bool is_empty = dir_is_empty(sub_dir);
       dir_close(sub_dir);
       if (!is_empty) {
+          goto done;
+      }
+      
+      // can't remove inode open multiple times
+      if (inode_get_open_cnt(inode) > 1) {
           goto done;
       }
   }

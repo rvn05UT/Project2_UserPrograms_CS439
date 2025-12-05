@@ -6,6 +6,7 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "threads/thread.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
@@ -140,6 +141,24 @@ bool filesys_remove (const char *name)
       return false;
     }
   
+  //ensure we can't remove the cwd and ancestors
+  struct inode *target_inode = NULL;
+  if (dir_lookup (dir, file_name, &target_inode))
+    {
+      struct dir *cwd = thread_current ()->cwd;
+      if (cwd != NULL)
+        {
+           if (inode_get_inumber (target_inode) == inode_get_inumber (dir_get_inode (cwd)))
+             {
+               inode_close (target_inode);
+               dir_close (dir);
+               free (file_name);
+               return false;
+             }
+        }
+      inode_close (target_inode);
+    }
+
   success = dir != NULL && dir_remove (dir, file_name);
   
   dir_close (dir);

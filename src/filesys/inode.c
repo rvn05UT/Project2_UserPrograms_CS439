@@ -665,3 +665,7 @@ bool inode_is_removed (struct inode *inode) {
   lock_release (&inode->inode_lock);
   return removed;
 }
+
+int inode_get_open_cnt (const struct inode *inode) {
+  return inode->open_cnt;
+}
