@@ -23,9 +23,25 @@ struct dir_entry
 
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
-bool dir_create (block_sector_t sector, size_t entry_cnt)
+bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent_sector)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+   if(!inode_create (sector, entry_cnt * sizeof (struct dir_entry), true)) {
+        return false;
+   }
+   struct dir *sub = dir_open (inode_open (sector));
+   if (sub == NULL) {
+       return false;
+   }
+   if (dir_add (sub, ".", sector) == false) {
+       dir_close (sub);
+       return false;
+   }
+    if (dir_add (sub, "..", parent_sector) == false) {
+        dir_close (sub);
+        return false;
+    }
+    dir_close (sub);
+    return true;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -186,6 +202,18 @@ bool dir_remove (struct dir *dir, const char *name)
   inode = inode_open (e.inode_sector);
   if (inode == NULL)
     goto done;
+  
+  if (is_inode_dir(inode)) {
+      struct dir *sub_dir = dir_open(inode);
+      if (sub_dir == NULL) {
+          goto done;
+      }
+      bool is_empty = dir_is_empty(sub_dir);
+      dir_close(sub_dir);
+      if (!is_empty) {
+          goto done;
+      }
+  }
 
   /* Erase directory entry. */
   e.in_use = false;
@@ -213,9 +241,29 @@ bool dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
       dir->pos += sizeof e;
       if (e.in_use)
         {
+          if (strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0) {
+              continue;
+          }
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         }
     }
   return false;
+}
+bool dir_is_empty(struct dir *dir) 
+{
+  struct dir_entry e;
+  off_t ofs;
+
+  ASSERT (dir != NULL);
+
+  for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+       ofs += sizeof e)
+    if (e.in_use)
+      {
+        if (strcmp(e.name, ".") != 0 && strcmp(e.name, "..") != 0) {
+            return false;
+        }
+      }
+  return true;
 }
