@@ -397,7 +397,7 @@ void inode_close (struct inode *inode)
     {
       block_write (fs_device, inode->sector, &inode->data);
       
-      /* Remove from inode list and release lock. */
+      /* Remove from inode list. */
       list_remove (&inode->elem);
 
       /* Deallocate blocks if removed. */
@@ -405,9 +405,9 @@ void inode_close (struct inode *inode)
         {
           free_map_release (inode->sector, 1);
           free_inode_blocks (&inode->data);
-          lock_release (&inode->inode_lock);
         }
 
+      lock_release (&inode->inode_lock);
       free (inode);
     }
   else
@@ -649,5 +649,19 @@ void inode_allow_write (struct inode *inode)
 off_t inode_length (const struct inode *inode) { return inode->data.length; }
 
 bool is_inode_dir(struct inode *inode) {
-  return inode->data.is_dir != 0;
+  if (inode == NULL)
+    return false;
+  lock_acquire (&inode->inode_lock);
+  bool result = inode->data.is_dir != 0;
+  lock_release (&inode->inode_lock);
+  return result;
+}
+
+bool inode_is_removed (struct inode *inode) {
+  if (inode == NULL)
+    return false;
+  lock_acquire (&inode->inode_lock);
+  bool removed = inode->removed;
+  lock_release (&inode->inode_lock);
+  return removed;
 }

@@ -10,16 +10,23 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "filesys/directory.h"
+#include "devices/block.h"
 #include "lib/kernel/console.h"
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
+#include <string.h>
+
+/* Directory entry structure (matches directory.c) */
+struct dir_entry
+{
+  block_sector_t inode_sector;
+  char name[NAME_MAX + 1];
+  bool in_use;
+};
 
 // standard file descriptor numbers
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
-
-// Global lock for file system synchronization
-struct lock filesys_lock;
 
 /* Function declarations */
 static void syscall_handler (struct intr_frame *);
@@ -46,9 +53,6 @@ void close_fd(int fd);
 
 void syscall_init (void)
 {
-  // initialize the file system lock
-  lock_init (&filesys_lock);
-  
   // register our system call handler for interrupt 0x30
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
@@ -188,9 +192,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
             validate_user_string(file);
-            lock_acquire (&filesys_lock);
             f->eax = filesys_create(file, initial_size);
-            lock_release (&filesys_lock);
         }
         break;
 
@@ -209,9 +211,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
             validate_user_string(file);
-            lock_acquire (&filesys_lock);
             f->eax = filesys_remove(file);
-            lock_release (&filesys_lock);
         }
         break;
 
@@ -223,9 +223,7 @@ static void syscall_handler (struct intr_frame *f)
 
           validate_user_string(file_name); 
 
-          lock_acquire (&filesys_lock);
           struct file *file = filesys_open(file_name);  
-          lock_release (&filesys_lock);
 
           if (file == NULL)
             {
@@ -235,9 +233,7 @@ static void syscall_handler (struct intr_frame *f)
             {
               f->eax = allocate_fd(file); 
               if (f->eax == -1) {
-                lock_acquire (&filesys_lock);
                 file_close(file);
-                lock_release (&filesys_lock);
               }
             }
           break;
@@ -277,9 +273,7 @@ static void syscall_handler (struct intr_frame *f)
           struct file *fptr = get_file_by_fd(fd);
           if (fptr != NULL)
             {
-              lock_acquire (&filesys_lock);
               file_seek(fptr, position);
-              lock_release (&filesys_lock);
             }
           break;
         }
@@ -298,9 +292,7 @@ static void syscall_handler (struct intr_frame *f)
             }
           else
             {
-              lock_acquire (&filesys_lock);
               f->eax = file_tell(fptr);
-              lock_release (&filesys_lock);
             }
           break;
         }
@@ -319,9 +311,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
           validate_user_string (dir);
-          lock_acquire (&filesys_lock);
           f->eax = chdir_sys (dir);
-          lock_release (&filesys_lock);
           break;
         }
 
@@ -339,9 +329,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
           validate_user_string (dir);
-          lock_acquire (&filesys_lock);
           f->eax = mkdir_sys (dir);
-          lock_release (&filesys_lock);
           break;
         }
 
@@ -361,9 +349,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
           validate_user_ptr (name);
-          lock_acquire (&filesys_lock);
           f->eax = readdir_sys (fd, name);
-          lock_release (&filesys_lock);
           break;
         }
 
@@ -375,9 +361,7 @@ static void syscall_handler (struct intr_frame *f)
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
             }
-          lock_acquire (&filesys_lock);
           f->eax = isdir_sys (fd);
-          lock_release (&filesys_lock);
           break;
         }
 
@@ -389,9 +373,7 @@ static void syscall_handler (struct intr_frame *f)
               printf ("%s: exit(-1)\n", thread_name ());
               thread_exit ();
             }
-          lock_acquire (&filesys_lock);
           f->eax = inumber_sys (fd);
-          lock_release (&filesys_lock);
           break;
         }
 
@@ -538,10 +520,15 @@ static int write (int fd, const void *buffer, unsigned size)
       if (temp == NULL) {
         return -1;
       }
+      struct inode *inode = file_get_inode (temp);
+      if (inode == NULL) {
+        return -1;
+      }
+      if (is_inode_dir (inode)) {
+        return -1;
+      }
       validate_user_buffer (buffer, size);
-      lock_acquire (&filesys_lock);
       int bytes_written = file_write(temp, buffer, size);
-      lock_release (&filesys_lock);
       return bytes_written;
     }
 }
@@ -594,9 +581,7 @@ static int read (int fd, void *buffer, unsigned size)
         return -1;
       }
       validate_user_buffer (buffer, size);
-      lock_acquire (&filesys_lock);
       int bytes_read = file_read(temp, buffer, size);
-      lock_release (&filesys_lock);
       if (bytes_read < 0) {
         printf("file_read failed for fd %d\n", fd);
       }
@@ -610,9 +595,7 @@ static int filesize_sys (int fd)
   struct file *f = get_file_by_fd(fd);
   if (f == NULL)
     return -1;
-  lock_acquire (&filesys_lock);
   int length = file_length(f);
-  lock_release (&filesys_lock);
   return length;
 }
 
@@ -647,9 +630,7 @@ void close_fd(int fd) {
   if (cur->fd_table == NULL || fd < 0 || fd > 128)
     return;
   if (cur->fd_table[fd] != NULL) {
-    lock_acquire (&filesys_lock);
     file_close(cur->fd_table[fd]);
-    lock_release (&filesys_lock);
     cur->fd_table[fd] = NULL;
     // update fd_next to allow reusing lower fds
     if (fd < cur->fd_next)
@@ -708,14 +689,25 @@ static bool readdir_sys (int fd, char *name)
   if (!is_inode_dir (inode))
     return false;
   
-  struct dir *dir = dir_open (inode_reopen (inode));
-  if (dir == NULL)
-    return false;
-  
-  bool success = dir_readdir (dir, name);
-  dir_close (dir);
-  
-  return success;
+  struct dir_entry e;
+  off_t pos = file_tell (file);
+  while (inode_read_at (inode, &e, sizeof e, pos) == sizeof e)
+    {
+      pos += sizeof e;
+      file_seek (file, pos);
+      if (e.in_use)
+        {
+          if (strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0) {
+              continue;
+          }
+          if (e.name[0] == '\0') {
+              continue;
+          }
+          strlcpy (name, e.name, NAME_MAX + 1);
+          return true;
+        }
+    }
+  return false;
 }
 
 static bool isdir_sys (int fd)

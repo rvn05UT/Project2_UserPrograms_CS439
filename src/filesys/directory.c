@@ -245,6 +245,9 @@ bool dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
           if (strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0) {
               continue;
           }
+          if (e.name[0] == '\0') {
+              continue;
+          }
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         }
@@ -262,6 +265,9 @@ bool dir_is_empty(struct dir *dir)
        ofs += sizeof e)
     if (e.in_use)
       {
+        if (e.name[0] == '\0') {
+            continue;
+        }
         if (strcmp(e.name, ".") != 0 && strcmp(e.name, "..") != 0) {
             return false;
         }
@@ -416,7 +422,16 @@ bool get_dir_and_name (const char *path, struct dir **dir, char **name)
       if (cur->cwd == NULL)
         resolved_dir = dir_open_root ();
       else
-        resolved_dir = dir_reopen (cur->cwd);
+        {
+          struct inode *cwd_inode = dir_get_inode (cur->cwd);
+          if (cwd_inode != NULL && inode_is_removed (cwd_inode))
+            {
+              free (dir_path);
+              free (file_name);
+              return false;
+            }
+          resolved_dir = dir_reopen (cur->cwd);
+        }
     }
   else
     {

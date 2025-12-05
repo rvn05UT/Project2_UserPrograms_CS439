@@ -93,7 +93,15 @@ struct file *filesys_open (const char *name)
       /* Opening a directory - return the directory's inode as a file */
       inode = dir_get_inode (dir);
       if (inode != NULL)
-        inode_reopen (inode);
+        {
+          if (inode_is_removed (inode))
+            {
+              dir_close (dir);
+              free (file_name);
+              return NULL;
+            }
+          inode_reopen (inode);
+        }
       dir_close (dir);
       free (file_name);
       return file_open (inode);
