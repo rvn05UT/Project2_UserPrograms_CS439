@@ -1,16 +1,9 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-#include "userprog/pagedir.h"
-#include "vm/page.h"
-#include "vm/frame.h"
-#include "filesys/file.h"
-#include "threads/vaddr.h"
-#include "userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -150,159 +143,14 @@ static void page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  /* To implement virtual memory, delete the rest of the function
+     body, and replace it with code that brings in the page to
+     which fault_addr refers. */
+  printf ("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading", user ? "user" : "kernel");
 
-  // Check if this is a user page fault (either from user mode or accessing user memory from kernel)
-  // If fault address is in user space, treat it as a user page fault (even if in kernel mode during syscall)
-  if (!user && !is_user_vaddr(fault_addr)) {
-    // Kernel accessing kernel memory - this is a kernel bug
-    printf ("Page fault at %p: kernel access to invalid address.\n", fault_addr);
-    kill(f);
-    return;
-  }
+  printf ("There is no crying in Pintos!\n");
 
-  //rights violation - page is present but access is not allowed
-  if(!not_present) {
-    // If this is a user address, kill the user process
-    // (even if we're in kernel mode during a syscall)
-    if (is_user_vaddr(fault_addr)) {
-      struct thread *cur = thread_current();
-      if (cur != NULL) {
-        cur->exit_status = -1;
-        printf ("%s: exit(-1)\n", thread_name ());
-        thread_exit ();
-      }
-    }
-    // Otherwise it's a kernel bug
-    kill(f);
-    return;
-  }
-
-
-  //no page directory
-  struct thread *cur = thread_current();
-  if(cur == NULL || cur -> pagedir == NULL) {
-   printf ("Page fault at %p: no page directory.\n", fault_addr);
-   kill(f);
-   return;
-  }
-
-  //no page in the SPT
-  struct page *p = page_lookup(&cur->spt, fault_addr);
-  if(p == NULL) {
-    // Reject NULL, page 0, and kernel addresses immediately - these are never valid
-    // Page 0 (addresses < PGSIZE) should never be mapped (see validate_segment)
-    if (fault_addr == NULL || (uintptr_t) fault_addr < PGSIZE || !is_user_vaddr(fault_addr)) {
-      kill(f);
-      return;
-    }
-    
-    //try to grow the stack
-    void *esp = NULL;
-    if (user) {
-      esp = (void *) f->esp;
-    }
-    
-    if (grow_stack (fault_addr, esp)) {
-      //stack growth successful, return to retry the instruction
-      return;
-    }
-    
-    //not a valid stack growth, kill the process silently
-    kill(f);
-    return;
-  }
-
-  //trying to write to a read-only page
-  if(write && !p->writable) {
-    // If this is a user address, kill the user process
-    // (even if we're in kernel mode during a syscall)
-    if (is_user_vaddr(fault_addr)) {
-      printf ("Page fault at %p: access to read-only page.\n", fault_addr);
-      struct thread *cur = thread_current();
-      if (cur != NULL) {
-        cur->exit_status = -1;
-        printf ("%s: exit(-1)\n", thread_name ());
-        thread_exit ();
-      }
-    }
-    // Otherwise it's a kernel bug
-    kill(f);
-    return;
-  }
-
-  //page already loaded
-  if(p->loaded) {
-   printf ("Page fault at %p: page already loaded.\n", fault_addr);
-   kill(f);
-   return;
-  }
-
-  //allocate a physical frame for the page
-  void *kpage = frame_alloc(p -> upage, false);
-  if(kpage == NULL) {
-   printf ("Page fault at %p: no memory for page.\n", fault_addr);
-   kill(f);
-   return;
-  }
-
-  // pin the frame while we populate it to avoid race conditions
-  frame_pin(kpage);
-
-  //load the page data into the frame
-  //if the page is a file, read the data from the executable
-  if(p->type == PAGE_FILE)
-  {
-    extern struct lock filesys_lock;
-    lock_acquire (&filesys_lock);
-    if (p->read_bytes > 0)
-      {
-        if (file_read_at (p->file, kpage, p->read_bytes, p->file_ofs) != (int) p->read_bytes)
-          {
-            lock_release (&filesys_lock);
-            frame_unpin(kpage);
-            frame_free (kpage);
-            printf ("Page fault at %p: failed to read from file.\n", fault_addr);
-            kill (f);
-            return;
-          }
-      }
-    lock_release (&filesys_lock);
-    
-    //zero out the rest of the page that wasn't filled from the file
-    memset ((uint8_t *) kpage + p->read_bytes, 0, p->zero_bytes);
-  }
-  else if (p->type == PAGE_SWAP)
-  {
-    //read the page data from swap space
-    swap_in (p->page_slot, kpage);
-  }
-  else if (p->type == PAGE_ZERO)
-  {
-    //fill the entire page with zeros (for uninitialized data)
-    memset (kpage, 0, PGSIZE);
-  }
-  else
-  {
-    frame_unpin(kpage);
-    frame_free (kpage);
-    printf ("Page fault at %p: unknown page type.\n", fault_addr);
-    kill (f);
-    return;
-  }
-
-   //install the page into the page directory
-   if (!pagedir_set_page (cur->pagedir, p->upage, kpage, p->writable))
-   {
-      frame_unpin(kpage);
-      frame_free (kpage);
-      printf ("Page fault at %p: failed to install page.\n", fault_addr);
-      kill (f);
-      return;
-   }
-
-   //mark the page as loaded
-   page_set_loaded (p, true);
-   frame_unpin(kpage);
-
+  kill (f);
 }
-
