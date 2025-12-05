@@ -9,18 +9,24 @@
 #include "devices/input.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
+#include "devices/block.h"
 #include "lib/kernel/console.h"
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
-#include "vm/page.h"
-#include "vm/frame.h"
+#include <string.h>
+
+/* Directory entry structure (matches directory.c) */
+struct dir_entry
+{
+  block_sector_t inode_sector;
+  char name[NAME_MAX + 1];
+  bool in_use;
+};
 
 // standard file descriptor numbers
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
-
-// Global lock for file system synchronization
-struct lock filesys_lock;
 
 /* Function declarations */
 static void syscall_handler (struct intr_frame *);
@@ -36,6 +42,11 @@ static int exec (const char *cmd_line);
 static int wait (int child_tid);
 static int read (int fd, void *buffer, unsigned size, void* esp);
 static int filesize_sys (int fd);
+static bool chdir_sys (const char *dir);
+static bool mkdir_sys (const char *dir);
+static bool readdir_sys (int fd, char *name);
+static bool isdir_sys (int fd);
+static int inumber_sys (int fd);
 int allocate_fd(struct file *file);
 struct file *get_file_by_fd(int fd);
 void close_fd(int fd);
@@ -46,9 +57,6 @@ bool path_res(const char *path, struct dir **parent, char **file_name);
 
 void syscall_init (void)
 {
-  // initialize the file system lock
-  lock_init (&filesys_lock);
-  
   // register our system call handler for interrupt 0x30
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
@@ -188,9 +196,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
             validate_user_string(file);
-            lock_acquire (&filesys_lock);
             f->eax = filesys_create(file, initial_size);
-            lock_release (&filesys_lock);
         }
         break;
 
@@ -209,9 +215,7 @@ static void syscall_handler (struct intr_frame *f)
               thread_exit ();
             }
             validate_user_string(file);
-            lock_acquire (&filesys_lock);
             f->eax = filesys_remove(file);
-            lock_release (&filesys_lock);
         }
         break;
 
@@ -223,9 +227,7 @@ static void syscall_handler (struct intr_frame *f)
 
           validate_user_string(file_name); 
 
-          lock_acquire (&filesys_lock);
           struct file *file = filesys_open(file_name);  
-          lock_release (&filesys_lock);
 
           if (file == NULL)
             {
@@ -235,9 +237,7 @@ static void syscall_handler (struct intr_frame *f)
             {
               f->eax = allocate_fd(file); 
               if (f->eax == -1) {
-                lock_acquire (&filesys_lock);
                 file_close(file);
-                lock_release (&filesys_lock);
               }
             }
           break;
@@ -277,9 +277,7 @@ static void syscall_handler (struct intr_frame *f)
           struct file *fptr = get_file_by_fd(fd);
           if (fptr != NULL)
             {
-              lock_acquire (&filesys_lock);
               file_seek(fptr, position);
-              lock_release (&filesys_lock);
             }
           break;
         }
@@ -298,15 +296,93 @@ static void syscall_handler (struct intr_frame *f)
             }
           else
             {
-              lock_acquire (&filesys_lock);
               f->eax = file_tell(fptr);
-              lock_release (&filesys_lock);
             }
           break;
         }
 
+      case SYS_CHDIR:
+        {
+          const char *dir;
+          if (!get_user_bytes ((uint8_t *) &dir, (uint8_t *) (esp + 1), sizeof (const char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          if (dir == NULL)
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_string (dir);
+          f->eax = chdir_sys (dir);
+          break;
+        }
+
+      case SYS_MKDIR:
+        {
+          const char *dir;
+          if (!get_user_bytes ((uint8_t *) &dir, (uint8_t *) (esp + 1), sizeof (const char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          if (dir == NULL)
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_string (dir);
+          f->eax = mkdir_sys (dir);
+          break;
+        }
+
+      case SYS_READDIR:
+        {
+          int fd;
+          char *name;
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)) ||
+              !get_user_bytes ((uint8_t *) &name, (uint8_t *) (esp + 2), sizeof (char *)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          if (name == NULL)
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          validate_user_ptr (name);
+          f->eax = readdir_sys (fd, name);
+          break;
+        }
+
+      case SYS_ISDIR:
+        {
+          int fd;
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          f->eax = isdir_sys (fd);
+          break;
+        }
+
+      case SYS_INUMBER:
+        {
+          int fd;
+          if (!get_user_bytes ((uint8_t *) &fd, (uint8_t *) (esp + 1), sizeof (int)))
+            {
+              printf ("%s: exit(-1)\n", thread_name ());
+              thread_exit ();
+            }
+          f->eax = inumber_sys (fd);
+          break;
+        }
+
       default:
-        // unknown system call - terminate process (file system calls not implemented yet)
+        // unknown system call - terminate process
         printf ("%s: exit(-1)\n", thread_name ());
         thread_exit ();
     }
@@ -474,13 +550,15 @@ static int write (int fd, const void *buffer, unsigned size, void* esp)
       if (temp == NULL) {
         return -1;
       }
-      validate_user_buffer (buffer, size, esp);
-      // pin buffer
-      vm_pin_buffer(buffer, size, false);
-      lock_acquire (&filesys_lock);
+      struct inode *inode = file_get_inode (temp);
+      if (inode == NULL) {
+        return -1;
+      }
+      if (is_inode_dir (inode)) {
+        return -1;
+      }
+      validate_user_buffer (buffer, size);
       int bytes_written = file_write(temp, buffer, size);
-      lock_release (&filesys_lock);
-      vm_unpin_buffer(buffer, size);
       return bytes_written;
     }
 }
@@ -532,13 +610,8 @@ static int read (int fd, void *buffer, unsigned size, void* esp)
       if (temp == NULL) {
         return -1;
       }
-      validate_user_buffer (buffer, size, esp);
-      //pin buffer
-      vm_pin_buffer(buffer, size, true);
-      lock_acquire (&filesys_lock);
+      validate_user_buffer (buffer, size);
       int bytes_read = file_read(temp, buffer, size);
-      lock_release (&filesys_lock);
-      vm_unpin_buffer(buffer, size);
       if (bytes_read < 0) {
         printf("file_read failed for fd %d\n", fd);
       }
@@ -552,9 +625,7 @@ static int filesize_sys (int fd)
   struct file *f = get_file_by_fd(fd);
   if (f == NULL)
     return -1;
-  lock_acquire (&filesys_lock);
   int length = file_length(f);
-  lock_release (&filesys_lock);
   return length;
 }
 
@@ -589,121 +660,108 @@ void close_fd(int fd) {
   if (cur->fd_table == NULL || fd < 0 || fd > 128)
     return;
   if (cur->fd_table[fd] != NULL) {
-    lock_acquire (&filesys_lock);
     file_close(cur->fd_table[fd]);
-    lock_release (&filesys_lock);
     cur->fd_table[fd] = NULL;
     // update fd_next to allow reusing lower fds
     if (fd < cur->fd_next)
       cur->fd_next = fd;
   }
 }
-static char *stringdup_kern(const char *s) {
-  size_t len = strlen(s) + 1;
-  char *copy = malloc(len);
-  if (copy == NULL)
-    return NULL;
-  memcpy(copy, s, len);
-  return copy;
+
+static bool chdir_sys (const char *dir)
+{
+  if (dir == NULL)
+    return false;
+  
+  struct file *dir_file = filesys_open (dir);
+  if (dir_file == NULL)
+    return false;
+  
+  struct inode *inode = file_get_inode (dir_file);
+  if (!is_inode_dir (inode))
+    {
+      file_close (dir_file);
+      return false;
+    }
+  
+  struct thread *cur = thread_current ();
+  struct dir *new_cwd = dir_open (inode_reopen (inode));
+  file_close (dir_file);
+  
+  if (new_cwd == NULL)
+    return false;
+  
+  if (cur->cwd != NULL)
+    dir_close (cur->cwd);
+  
+  cur->cwd = new_cwd;
+  return true;
 }
 
-bool path_resolve(const char *path, struct dir **parent, char **file_name) {
-  struct dir *cur = NULL;
-  char *copy = NULL;
-  char *token, *save_ptr;
-  bool success = false;
-
-  if (path == NULL || parent == NULL || file_name == NULL) {
+static bool mkdir_sys (const char *dir)
+{
+  if (dir == NULL)
     return false;
-  }
-
-  copy = stringdup_kern(path);
-  if (copy == NULL) {
-    return false;
-  }
-
-  if (path[0] == '/') {
-    cur = dir_open_root();
-  } else {
-    struct thread *t = thread_current();
-    if (t->cwd != NULL) {
-      cur = dir_reopen(t->cwd);
-    } else {
-      cur = dir_open_root();
-    }
-  }
-
-  if (cur == NULL) {
-    free(copy);
-    return false;
-  }
-
-  if (strcmp(copy, "/") == 0 || strcmp(copy, "") == 0) {
-    file_name[0] = '\0';
-    *parent = cur;
-    free(copy);
-    return true;
-  }
-
-  token = strtok_r(copy, "/", &save_ptr);
-  char next_token_buf[NAME_MAX + 1]; // lebron TODO: set max
-  token = token; // to avoid unused variable warning
-
-  char *last_token = NULL;
-  char *tok = NULL;
-  tok = strtok_r(NULL, "/", &save_ptr);
-  while (tok != NULL) {
-    if (last_token != NULL) {
-      free(last_token);
-    }
-    last_token = stringdup_kern(tok);
-    char *next = strtok_r(NULL, "/", &save_ptr);
-    if (next != NULL) {
-      struct inode *inode = NULL;
-      if (!dir_lookup(cur, tok, &inode)) {
-        // No such component
-        dir_close(cur);
-        free(last_token);
-        free(copy);
-        return false;
-      }
-
-      //must be a directory
-      if (!inode_is_dir(inode)) {
-        inode_close(inode);
-        dir_close(cur);
-        free(last_token);
-        free(copy);
-        return false;
-      }
-
-      // move to next directory
-      struct dir *next_dir = dir_open(inode);
-      dir_close(cur);
-      cur = next_dir;
-      tok = next;
-      free(last_token);
-      last_token = stringdup_kern(tok);
-      tok = strtok_r(NULL, "/", &save_ptr);
-      continue;
-    }
-    else {
-      break; // last token
-    }
-
-  }
-  if (last_token == NULL) {
-    dir_close(cur);
-    free(copy);
-    return false;
-  }
-
-  strncpy(file_name, last_token, NAME_MAX + 1);
-  file_name[NAME_MAX] = '\0'; // ensure null-termination //lebron TODO: fix NAME_MAX
-  free(last_token);
-  *parent = cur;
-  free(copy);
-
   
-  return true; 
+  return filesys_mkdir (dir);
+}
+
+static bool readdir_sys (int fd, char *name)
+{
+  if (fd < 0 || fd > 128 || name == NULL)
+    return false;
+  
+  struct file *file = get_file_by_fd (fd);
+  if (file == NULL)
+    return false;
+  
+  struct inode *inode = file_get_inode (file);
+  if (!is_inode_dir (inode))
+    return false;
+  
+  struct dir_entry e;
+  off_t pos = file_tell (file);
+  while (inode_read_at (inode, &e, sizeof e, pos) == sizeof e)
+    {
+      pos += sizeof e;
+      file_seek (file, pos);
+      if (e.in_use)
+        {
+          if (strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0) {
+              continue;
+          }
+          if (e.name[0] == '\0') {
+              continue;
+          }
+          strlcpy (name, e.name, NAME_MAX + 1);
+          return true;
+        }
+    }
+  return false;
+}
+
+static bool isdir_sys (int fd)
+{
+  if (fd < 0 || fd > 128)
+    return false;
+  
+  struct file *file = get_file_by_fd (fd);
+  if (file == NULL)
+    return false;
+  
+  struct inode *inode = file_get_inode (file);
+  return is_inode_dir (inode);
+}
+
+static int inumber_sys (int fd)
+{
+  if (fd < 0 || fd > 128)
+    return -1;
+  
+  struct file *file = get_file_by_fd (fd);
+  if (file == NULL)
+    return -1;
+  
+  struct inode *inode = file_get_inode (file);
+  return (int) inode_get_inumber (inode);
 }

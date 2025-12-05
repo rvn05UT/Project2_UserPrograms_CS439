@@ -16,6 +16,17 @@ struct indirect_block {
 struct doubly_indirect_block {
   block_sector_t indirect[128];
 };
+#include "threads/synch.h"
+
+// indirect block wrapper
+struct indirect_block {
+  block_sector_t direct[128];
+};
+
+// double indirect block wrapper
+struct doubly_indirect_block {
+  block_sector_t indirect[128];
+};
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -29,7 +40,8 @@ struct inode_disk
   block_sector_t double_indirect; /* doubly indirect sector. blocks 139 - 16522*/
   off_t length;         /* File size in bytes. */
   unsigned magic;       /* Magic number. */
-  uint32_t unused[112]; /* Not used, ensures offset to 512 bytes */
+  uint32_t is_dir;      /* True if directory, false if file */
+  uint32_t unused[111]; /* Not used, ensures offset to 512 bytes */
 };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -111,9 +123,13 @@ static block_sector_t byte_to_sector (const struct inode *inode, off_t pos)
 /* List of open inodes, so that opening a single inode twice
    returns the same `struct inode'. */
 static struct list open_inodes;
+static struct lock inode_list_lock;
 
 /* Initializes the inode module. */
-void inode_init (void) { list_init (&open_inodes); }
+void inode_init (void) { 
+  list_init (&open_inodes); 
+  lock_init (&inode_list_lock);
+  }
 
 //heler: ensures a block is allocated
 static bool alloc_data_block (block_sector_t *out)
@@ -274,7 +290,7 @@ static void free_inode_blocks (struct inode_disk *disk_inode)
    device.
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
-bool inode_create (block_sector_t sector, off_t length)
+bool inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -291,6 +307,7 @@ bool inode_create (block_sector_t sector, off_t length)
       size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
+      disk_inode->is_dir = is_dir ? 1 : 0;
       
       memset (disk_inode->direct, 0, sizeof disk_inode->direct);
       disk_inode->indirect = 0;
@@ -330,7 +347,7 @@ struct inode *inode_open (block_sector_t sector)
 {
   struct list_elem *e;
   struct inode *inode;
-
+  lock_acquire (&inode_list_lock);
   /* Check whether this inode is already open. */
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
        e = list_next (e))
@@ -339,6 +356,7 @@ struct inode *inode_open (block_sector_t sector)
       if (inode->sector == sector)
         {
           inode_reopen (inode);
+          lock_release (&inode_list_lock);
           return inode;
         }
     }
@@ -349,6 +367,7 @@ struct inode *inode_open (block_sector_t sector)
     return NULL;
 
   /* Initialize. */
+  lock_release (&inode_list_lock);
   list_push_front (&open_inodes, &inode->elem);
   inode->sector = sector;
   inode->open_cnt = 1;
@@ -383,11 +402,12 @@ void inode_close (struct inode *inode)
     return;
 
   /* Release resources if this was the last opener. */
+  lock_acquire (&inode->inode_lock);
   if (--inode->open_cnt == 0)
     {
       block_write (fs_device, inode->sector, &inode->data);
       
-      /* Remove from inode list and release lock. */
+      /* Remove from inode list. */
       list_remove (&inode->elem);
 
       /* Deallocate blocks if removed. */
@@ -397,7 +417,12 @@ void inode_close (struct inode *inode)
           free_inode_blocks (&inode->data);
         }
 
+      lock_release (&inode->inode_lock);
       free (inode);
+    }
+  else
+    {
+      lock_release (&inode->inode_lock);
     }
 }
 
@@ -632,3 +657,25 @@ void inode_allow_write (struct inode *inode)
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length (const struct inode *inode) { return inode->data.length; }
+
+bool is_inode_dir(struct inode *inode) {
+  if (inode == NULL)
+    return false;
+  lock_acquire (&inode->inode_lock);
+  bool result = inode->data.is_dir != 0;
+  lock_release (&inode->inode_lock);
+  return result;
+}
+
+bool inode_is_removed (struct inode *inode) {
+  if (inode == NULL)
+    return false;
+  lock_acquire (&inode->inode_lock);
+  bool removed = inode->removed;
+  lock_release (&inode->inode_lock);
+  return removed;
+}
+
+int inode_get_open_cnt (const struct inode *inode) {
+  return inode->open_cnt;
+}

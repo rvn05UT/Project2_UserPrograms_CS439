@@ -5,7 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
-#include "lib/kernel/hash.h"
+#ifdef USERPROG
+#include "filesys/directory.h"
+#endif
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -123,8 +125,7 @@ struct thread
   struct semaphore load_done;      // semaphore for exec load completion
 
   struct child_status *cstatus;    // child's record in parent's children list
-  struct hash spt;
-
+  struct dir *cwd;                 // current working directory
 #endif
 struct dir *cwd; // current working directory, NULL until set by filesys_init or from parent
 struct fd_entry *fd_list[128]; // list of open file descriptors

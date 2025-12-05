@@ -25,9 +25,6 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *file_name, void (**eip) (void), void **esp);
 
-// External reference to the file system lock from syscall.c
-extern struct lock filesys_lock;
-
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -97,6 +94,11 @@ tid_t process_execute (const char *file_name)
       // link child status record to child thread
       child->cstatus = cur_status;
       child->parent = thread_current();
+      // inherit current working directory from parent
+      if (thread_current()->cwd != NULL)
+        child->cwd = dir_reopen (thread_current()->cwd);
+      else
+        child->cwd = NULL;
       // add to parent's children list
       list_push_back(&thread_current()->children, &cur_status->elem);
     }
@@ -123,6 +125,11 @@ static void start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  struct thread *cur = thread_current();
+
+  /* Initialize current working directory to root if not already set */
+  if (cur->cwd == NULL)
+    cur->cwd = dir_open_root ();
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -137,7 +144,6 @@ static void start_process (void *file_name_)
   }
   /* If load failed, quit. */
   // Note: file_name is now the original command line, not allocated with palloc
-  struct thread *cur = thread_current();
   sema_up(&cur->load_done);
   palloc_free_page (file_name);
   if (!success)
@@ -222,11 +228,7 @@ void process_exit (void)
   bool filesys_lock_held = lock_held_by_current_thread(&filesys_lock);
 
     if(cur->executable != NULL) {
-        if (!filesys_lock_held)
-          lock_acquire (&filesys_lock);
         file_close(cur->executable);
-        if (!filesys_lock_held)
-          lock_release (&filesys_lock);
         cur->executable = NULL;
     }
   
@@ -248,11 +250,7 @@ void process_exit (void)
     {
       if (cur->fd_table && cur->fd_table[i] != NULL)
         {
-          if (!filesys_lock_held)
-            lock_acquire (&filesys_lock);
           file_close(cur->fd_table[i]);
-          if (!filesys_lock_held)
-            lock_release (&filesys_lock);
           cur->fd_table[i] = NULL;
         }
     }
@@ -384,9 +382,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
     palloc_free_page (fn_copy);
     goto done;
   }
-  lock_acquire (&filesys_lock);
   file = filesys_open (prog);
-  lock_release (&filesys_lock);
   palloc_free_page (fn_copy);
 
 
@@ -396,9 +392,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
       goto done;
     }
 
-  lock_acquire (&filesys_lock);
   file_deny_write(file);
-  lock_release (&filesys_lock);
   t->executable = file;
   
   /* Read and verify executable header. */
@@ -484,10 +478,8 @@ done:
   /* We arrive here whether the load is successful or not. */
   /* If load failed and we have an executable file, clean it up */
   if (!success && file != NULL) {
-    lock_acquire (&filesys_lock);
     file_allow_write(file);
     file_close(file);
-    lock_release (&filesys_lock);
     t->executable = NULL;
   }
   return success;
