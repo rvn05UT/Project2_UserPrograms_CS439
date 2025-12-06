@@ -110,7 +110,10 @@ Slip days used on this project: 0
 
 >> A2: What is the maximum size of a file supported by your inode
 >> structure?  Show your work.
->>
+>> 12 direct pointers, one single-indeirect block containing 128 pointers, and
+one doubly-indirect block that references 128 indirect blocks, each containing
+128 data pointers. Therefore, 12+128+(128*128) = 16,524 data sectors. Each
+sector is 512 bytes, to max file size is 16,524*512= 8,460,288 bytes.
 
 
 ---- SYNCHRONIZATION ----
@@ -118,7 +121,11 @@ Slip days used on this project: 0
 
 >> A3: Explain how your code avoids a race if two processes attempt to
 >> extend a file at the same time.
->>
+>> We prevent races during file extension by using a per-inode lock that is 
+acquired at the strt of inode_write_at(). when two processes try to extend the
+file simultaneously, only one may hold the lock at a time, which makes sure 
+that allocating new sectors, updating the inode's length, or modifying indirect
+blocks happen in a serialized manner.
 
 
 >> A4: Suppose processes A and B both have file F open, both
@@ -127,7 +134,13 @@ Slip days used on this project: 0
 >> may not read data other than what B writes, e.g. if B writes
 >> nonzero data, A is not allowed to see all zeros.  Explain how your
 >> code avoids this race.
->>
+>> The race between one process reading at the end-of-file and another writing
+is prevented because both inode_reat_at and inode_write_at acquire the same 
+inode_lock. Since these two operations can't run their critical sections 
+concurrently, a reader neve sees partially written metadata or newly allocated
+blocks that haven't been initialized. When a writer extends the file, it 
+zero-fills new sectors before releasing the lock, making sure readers never
+encounter garbage or leftover data.
 
 
 
@@ -138,7 +151,12 @@ Slip days used on this project: 0
 >> cannot forever prevent another process from writing to the file, and
 >> one or many processes writing to a file cannot forever prevent
 >> another process from reading the file.
->>
+>> Fairness arises because both readers and writers use the same per-inode 
+mutex, which makes sure that neither type of operation can get ahead of the 
+other indefinitely. Since critical sections are short (limited to metadata
+updates, block allocation), threads release the lock quickly, giving the 
+scheduler frequent opportunities to switch between readers and writers, and 
+this prevents starvation. 
 
 
 
@@ -157,7 +175,13 @@ Slip days used on this project: 0
 >> structure have, compared to a multilevel index?
 >> In your explanation, include at least two reasons to support your 
 >> choices.
->>
+>> We use a multilevel indexed inode with 12 direct pointers, one 
+single-indirect pointer, and one double-indirect pointer bevcause this 
+structure has the best balance between performance and scalability. Small files
+have fast access through direct blocks, medium-sized files expand through the 
+single-indirect block, and super large files have a lot of capacity through the
+double-indirect block without inflating the inode itself, it allows large files
+to grow incrementally.
 
 
 
@@ -183,7 +207,15 @@ Slip days used on this project: 0
 
 >> B2: Describe your code for traversing a user-specified path.  How
 >> do traversals of absolute and relative paths differ?
->>
+>> Path traversal starts by normalizing the user-supplied path and splitting 
+into a directory portion and a final name. Absolute paths begin at the root 
+directory, while relative paths begin at the calling thread's current working 
+directory. The traversal goes on component by component, "." stays in the same 
+directory, ".." moves to the parent, and all other tokens through lookups in 
+the current directory's data blocks. For each name, the code opens the 
+corresponding inode and advances deeper into the tree until it reaches the 
+directory that has the final component. Absolute and relative paths only differ
+in their starting directory, the rest is basically the same.
 
 
 ---- SYNCHRONIZATION ----
@@ -193,7 +225,14 @@ Slip days used on this project: 0
 >> only one of two simultaneous attempts to remove a single file
 >> should succeed, as should only one of two simultaneous attempts to
 >> create a file with the same name, and so on.
->>
+>> We prevent races on directory entries by relying on the directory's backing
+inode lock, which serialized all operationg that read or modify the directory 
+file. Both dir_add and dir_remove internally call inode_read_at and 
+inode_write_at, each of which acquires the same inode_lock. Because the check
+for whether a name already exists and the subsequent write occur under the same
+lock, only one of two simultaneously creates or removes can succeed for any 
+given filename.
+
 
 
 >> B4: Does your implementation allow a directory to be removed if it
@@ -201,7 +240,13 @@ Slip days used on this project: 0
 >> working directory?  If so, what happens to that process's future
 >> file system operations?  If thatâ€™s not allowed, how do you
 >> prevent it?
->>
+>> We don't allow a directory to be removed if it' concurrently open or used as
+a thread's working directory. The directory removal logic checks whether the 
+directory's inode has more than one opener and rejects removal when it does, 
+which prevents deletion while any process still holds it open. The removal code
+also checks whether the directory i the caller's current working directory and 
+refuses the operaiton if so, avoiding cases where a process's future file 
+operations would refer to a deleted location.
 
 
 
@@ -214,7 +259,12 @@ Slip days used on this project: 0
 >> B5: What type of variable/structure did you use to represent the 
 >> current directory of a process?   Why did you choose this 
 >> representation?  Give at least two reasons.
->>
+>> Each thread's current directory is stored as a struct dir *cwd pointer 
+within the thread structure. This representation is efficient because it allows
+direct access to the underlying directory inode without repeatedly parsing or 
+resolving the directory path. Storying a directory pointer avoids expensive 
+path computations and makes sure consistent semantics for relative paths across
+all filesystem operaitons.
 
 
 
@@ -252,4 +302,4 @@ the semester.
 
 
 >> Any other comments?
->>
+>> thank you
