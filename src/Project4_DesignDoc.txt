@@ -90,7 +90,7 @@ Slip days used on this project: 0
 
 
 >> Please paste a link to your GitLab repo below.
->>
+>> https://gitlab-fall25.cs.utexas.edu/rvn05/cs439project-04-filesystem#
 
 
 
@@ -106,6 +106,39 @@ Slip days used on this project: 0
 >> enumeration that was necessary for your indexed and extensible file
 >> implementation.  Identify the purpose of each in 25 words or less.
 >>
+
+struct indirect_block {
+  block_sector_t direct[128];
+};
+struct storing 128 sector pointers for single indirect blocks
+
+struct doubly_indirect_block {
+  block_sector_t indirect[128];
+}; struct storing 128 indirect block pointers for double indirect addressing
+
+struct inode_disk {
+  ...
+  block_sector_t direct[12]; 
+  block_sector_t indirect;
+  block_sector_t double_indirect;
+  ...
+};
+On-disk inode with 12 direct pointers,one single-indirect pointer, 
+one double-indirect pointer for indexed file structure
+
+struct inode {
+  ...
+  struct lock inode_lock;
+};
+inode lock for each inode for synchronizing 
+access to inode operations and preventing race conditions.
+
+static struct lock inode_list_lock;
+lock protecting list of open inodes from concurrent modifications
+
+static struct lock free_map_lock;
+lock synchronizing free map allocation and release to 
+prevent sector conflicts
 
 
 >> A2: What is the maximum size of a file supported by your inode
@@ -199,7 +232,35 @@ to grow incrementally.
 >> `struct' member, global or static variable, `typedef', â€˜#defineâ€™, or
 >> enumeration that was necessary for your subdirectory 
 >> implementation.  Identify the purpose of each in 25 words or less.
->>
+>> 
+struct dir {
+  struct inode *inode;
+  off_t pos;
+};
+Inmemory directory structure wrapping an inode with current read position
+
+struct dir_entry {
+  block_sector_t inode_sector;
+  char name[NAME_MAX + 1];
+  bool in_use;
+};
+directory entry mapping a file name to inode sector number
+
+struct inode_disk {
+  ...
+  uint32_t is_dir;
+  ...
+};
+ flag in on disk inode indicating whether
+the inode represents a directory or regular file
+
+struct thread {
+  ...
+  struct dir *cwd;
+  ...
+};
+current working directory pointer for each thread to 
+support relative path 
 
 
 ---- ALGORITHMS ----
